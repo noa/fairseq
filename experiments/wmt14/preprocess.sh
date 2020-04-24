@@ -11,6 +11,7 @@ fairseq-preprocess --source-lang en \
 		   --destdir $DATA/bin/wmt14_en_de \
 		   --thresholdtgt 0 \
 		   --thresholdsrc 0 \
-		   --workers 20
+		   --joined-dictionary \
+		   --workers 16
 
 # eof
