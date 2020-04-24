@@ -8,7 +8,7 @@ fairseq-preprocess --source-lang en \
 		   --trainpref $DATA/train \
 		   --validpref $DATA/valid \
 		   --testpref $DATA/test \
-		   --destdir $DATA/bin/wmt17_en_de \
+		   --destdir $DATA/bin/wmt14_en_de \
 		   --thresholdtgt 0 \
 		   --thresholdsrc 0 \
 		   --workers 20
