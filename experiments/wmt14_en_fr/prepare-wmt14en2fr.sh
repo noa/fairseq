@@ -7,12 +7,13 @@ git clone https://github.com/moses-smt/mosesdecoder.git
 echo 'Cloning Subword NMT repository (for BPE pre-processing)...'
 git clone https://github.com/rsennrich/subword-nmt.git
 
-SCRIPTS=mosesdecoder/scripts
+SCRIPTS=`realpath mosesdecoder/scripts`
+echo ${SCRIPTS}
 TOKENIZER=$SCRIPTS/tokenizer/tokenizer.perl
 CLEAN=$SCRIPTS/training/clean-corpus-n.perl
 NORM_PUNC=$SCRIPTS/tokenizer/normalize-punctuation.perl
 REM_NON_PRINT_CHAR=$SCRIPTS/tokenizer/remove-non-printing-char.perl
-BPEROOT=subword-nmt/subword_nmt
+BPEROOT=`realpath subword-nmt/subword_nmt`
 BPE_TOKENS=40000
 
 URLS=(

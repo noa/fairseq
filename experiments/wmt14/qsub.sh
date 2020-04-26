@@ -1,5 +1,4 @@
-#!/bin/bash
-##! /usr/bin/env bash
+#! /usr/bin/env bash
 
 set -e
 set -u
@@ -21,17 +20,17 @@ PATIENCE=5
 TOKENS=4096
 MAX_STEPS=250000
 
-if [ $# -lt 3 ]; then
-   echo "Usage: ${0} TASK JOB_NAME SEED [FLAGS]"
+if [ $# -lt 2 ]; then
+   echo "Usage: ${0} JOB_NAME SEED [FLAGS]"
    exit
 fi
 
-TASK=${1}
-JOB_NAME=${2}
-SEED=${3}
+TASK=en_de
+JOB_NAME=${1}
+SEED=${2}
 shift
 shift
-shift
+
 
 DATA_DIR=/expscratch/nandrews/fairseq/wmt14_${TASK}
 if [ ! -d "${DATA_DIR}" ]; then
@@ -105,6 +104,5 @@ chmod a+x ${JOB_SCRIPT}
 QSUB_CMD="qsub -q gpu.q@@${GPU_TYPE} -l gpu=${N_GPU},mem_free=${MEM},h_rt=${HOURS}:00:00,num_proc=${NUM_PROC} ${JOB_SCRIPT}"
 echo ${QSUB_CMD}
 ${QSUB_CMD}
-
 
 # eof

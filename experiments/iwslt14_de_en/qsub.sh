@@ -12,7 +12,7 @@ MEM=12G
 HOURS=48
 
 # --- HPARAMS ---
-ARCH=transformer_wmt_en_de
+ARCH=transformer_iwslt_de_en
 
 # --- OPTIMIZATION ---
 VAL_FREQ=5
@@ -25,19 +25,18 @@ if [ $# -lt 2 ]; then
    exit
 fi
 
-TASK=en_de
 JOB_NAME=${1}
 SEED=${2}
 shift
 shift
 
-DATA_DIR=/expscratch/nandrews/fairseq/wmt16_${TASK}
+DATA_DIR=/expscratch/nandrews/fairseq/iwslt14.tokenized.de-en
 if [ ! -d "${DATA_DIR}" ]; then
     echo "${DATA_DIR} does not exist"
     exit
 fi
 
-JOB_DIR=/expscratch/${USER}/fairseq/wmt16_${TASK}/jobs/${JOB_NAME}
+JOB_DIR=/expscratch/${USER}/fairseq/iwslt14_de_en/jobs/${JOB_NAME}
 mkdir -p ${JOB_DIR}
 JOB_SCRIPT=${JOB_DIR}/job.sh
 
@@ -66,21 +65,22 @@ module load nccl/2.4.7_cuda10.1
 export MKL_SERVICE_FORCE_INTEL=1
 
 fairseq-train \
-    ${DATA_DIR}/bin/wmt16_en_de_bpe32k \
+    ${DATA_DIR}/bin \
     --save-dir ${JOB_DIR} \
     --seed ${SEED} \
     --arch ${ARCH} \
-    --share-all-embeddings \
+    --share-decoder-input-output-embed \
     --no-progress-bar \
     --keep-last-epochs 10 \
     --optimizer adam \
     --adam-betas '(0.9, 0.98)' \
     --clip-norm 0.0 \
-    --lr 0.0007 \
+    --lr 5e-4 \
+    --weight-decay 0.0001 \
+    --dropout 0.3 \
     --lr-scheduler inverse_sqrt \
     --warmup-updates 4000 \
     --warmup-init-lr 1e-7 \
-    --min-lr 1e-09 \
     --weight-decay 0.0 \
     --criterion label_smoothed_cross_entropy \
     --label-smoothing 0.1 \
@@ -102,6 +102,5 @@ chmod a+x ${JOB_SCRIPT}
 QSUB_CMD="qsub -q gpu.q@@${GPU_TYPE} -l gpu=${N_GPU},mem_free=${MEM},h_rt=${HOURS}:00:00,num_proc=${NUM_PROC} ${JOB_SCRIPT}"
 echo ${QSUB_CMD}
 ${QSUB_CMD}
-
 
 # eof
