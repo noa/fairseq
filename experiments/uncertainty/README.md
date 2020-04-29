@@ -26,3 +26,13 @@ the model. Some relevant flags:
 * `--sampling`: sample hypotheses instead of using beam search
 * `--iter-decode-with-external-reranker`: if set, the last checkpoint are assumed to be a reranker to rescore the translations
 * `--beam`: beam size
+
+The `fairseq-generate` command produces confidences (in log base 2, I believe):
+
+"This generation script produces three types of outputs: a line
+prefixed with O is a copy of the original source sentence; H is the
+hypothesis along with an average log-likelihood; and P is the
+positional score per token position, including the end-of-sentence
+marker which is omitted from the text."
+
+See: https://fairseq.readthedocs.io/en/latest/getting_started.html#evaluating-pre-trained-models
