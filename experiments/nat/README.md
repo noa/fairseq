@@ -1,3 +1,20 @@
+# Install
+
+It may be necessary to run some extra steps, see:
+
+* https://github.com/pytorch/fairseq/issues/1199
+
+Specifically:
+
+```
+export CUDA_HOME=/cm/shared/apps/cuda10.1/toolkit/10.1.105
+module load gcc
+python setup.py build_ext --inplace
+pip install --editable .
+```
+
+# Data
+
 The distillation dataset is downloaded here:
 
 /exp/nandrews/nmt_datasets/distill
@@ -21,3 +38,5 @@ better performance. The best model I can get from this argument is
 around 26.9~27.1 on test set."
 
 "@raymondhs No, we didn't use compound_split_bleu.sh."
+
+# Training

@@ -7,14 +7,12 @@ set -u
 UPDATE_FREQ=4
 MAX_UPDATE=300000
 
-if [ $# -lt 2 ]; then
-   echo "Usage: ${0} JOB_NAME SEED [FLAGS]"
+if [ $# -lt 1 ]; then
+   echo "Usage: ${0} JOB_NAME [FLAGS]"
    exit
 fi
 
 JOB_NAME=${1}
-SEED=${2}
-shift
 shift
 
 
