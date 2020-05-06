@@ -14,6 +14,7 @@ DATA_DIR=/expscratch/nandrews/nmt/fairseq/data/wmt16_en_de_bpe32k
 
 VALIDATE=`realpath ../../validate.py`
 OUTPUT_FILE="${JOB_DIR}/train_${JOB_NAME}_dist.pkl"
+TOP_K=32
 
 echo "Output file: ${OUTPUT_FILE}"
 
@@ -25,6 +26,7 @@ python ${VALIDATE} ${DATA_DIR} \
        --path ${JOB_DIR}/checkpoint_last.pt \
        --max-tokens 7000 \
        --print-full-dist \
+       --dist-top-k ${TOP_K} \
        --fp16 \
        --num-workers 10
 

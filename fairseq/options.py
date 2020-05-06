@@ -502,7 +502,7 @@ def add_common_eval_args(group):
     # arguments for distillation
     group.add_argument('--print-full-dist', action='store_true',
                        help='if set, decoding returns the full marginals at each position')
-    group.add_argument('--full-dist-thresh', default=0.0, type=float,
+    group.add_argument('--dist-top-k', default=32, type=int,
                        help='threshold on confidences written out (to save disk space)')
     group.add_argument('--full-dist-path', default=None, type=str,
                        help='if set, write to separate file in numpy format')
