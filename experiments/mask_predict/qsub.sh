@@ -4,15 +4,22 @@ set -e
 set -u
 
 # --- SYSTEM ---
+N_GPU=2
+NUM_PROC=20
 UPDATE_FREQ=4
 MAX_UPDATE=300000
+GPU_TYPE=2080
+MEM=10G
+HOURS=48
 
-if [ $# -lt 1 ]; then
-   echo "Usage: ${0} JOB_NAME [FLAGS]"
+if [ $# -lt 2 ]; then
+   echo "Usage: ${0} JOB_NAME SEED [FLAGS]"
    exit
 fi
 
 JOB_NAME=${1}
+SEED=${2}
+shift
 shift
 
 
@@ -53,6 +60,7 @@ export MKL_SERVICE_FORCE_INTEL=1
 fairseq-train \
     ${DATA_DIR} \
     --save-dir ${JOB_DIR} \
+    --seed ${SEED} \
     --ddp-backend=no_c10d \
     --task translation_lev \
     --criterion nat_loss \
@@ -79,6 +87,8 @@ fairseq-train \
 EOL
 
 chmod a+x ${JOB_SCRIPT}
-bash ${JOB_SCRIPT}
+QSUB_CMD="qsub -q gpu.q@@${GPU_TYPE} -l gpu=${N_GPU},mem_free=${MEM},h_rt=${HOURS}:00:00,num_proc=${NUM_PROC} ${JOB_SCRIPT}"
+echo ${QSUB_CMD}
+${QSUB_CMD}
 
 # eof
