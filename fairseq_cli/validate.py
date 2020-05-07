@@ -114,15 +114,14 @@ def main(args, override_args=None):
             prefix=f"valid on '{subset}' subset",
             default_log_format=('tqdm' if not args.no_progress_bar else 'simple'),
         )
-        means = []
+
         log_outputs = []
         for i, sample in enumerate(progress):
             sample = utils.move_to_cuda(sample) if use_cuda else sample
             if args.print_full_dist:
-                ids = sample['id'].cpu().numpy()
-                n_sentences = ids.shape[0]
                 # IMPORTANT NOTE: Padding is used for sents of diff len
                 #print(criterion.padding_idx)
+                target = sample['target']
                 lprobs = task.predict_step(sample, model, criterion)
                 vals, inds = lprobs.topk(args.dist_top_k)
                 #print(vals.shape)
@@ -135,10 +134,19 @@ def main(args, override_args=None):
                 #t128 = lprobs.topk(lprobs, 128)
                 #lprobs = lprobs.cpu().numpy()
                 #print(lprobs.shape)
+                ids = sample['id'].cpu().numpy()
+                keep = np.logical_not(target.eq(criterion.padding_idx).cpu().numpy())
                 vals = vals.cpu().numpy()
                 inds = inds.cpu().numpy()
+                n_sentences = ids.shape[0]
                 for j in range(n_sentences):
-                    pickle.dump((ids[j], vals[j], inds[j]), dist_output_file)
+                    kj = keep[j]
+                    #s = sum(kj)
+                    #l = kj.shape[0]
+                    #if s < l:
+                    #  print(f'{s} {l}')
+                    pickle.dump((ids[j], vals[j][kj], inds[j][kj]),
+                                dist_output_file)
             else:
                 _loss, _sample_size, log_output = task.valid_step(sample, model, criterion)
                 progress.log(log_output, step=i)
