@@ -77,7 +77,7 @@ fairseq-train \
     --apply-bert-init \
     --log-format 'simple' --log-interval 100 \
     --fixed-validation-seed 7 \
-    --max-tokens 4096 \
+    --max-tokens 8000 \
     --fp16 \
     --save-interval-updates 10000 \
     --keep-last-epochs 10 \
