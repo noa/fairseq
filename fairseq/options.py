@@ -498,6 +498,14 @@ def add_common_eval_args(group):
                             'that were used during model training')
     group.add_argument('--results-path', metavar='RESDIR', type=str, default=None,
                        help='path to save eval results (optional)"')
+
+    # arguments for distillation
+    group.add_argument('--print-full-dist', action='store_true',
+                       help='if set, decoding returns the full marginals at each position')
+    group.add_argument('--dist-top-k', default=32, type=int,
+                       help='threshold on confidences written out (to save disk space)')
+    group.add_argument('--full-dist-path', default=None, type=str,
+                       help='if set, write to separate file in numpy format')
     # fmt: on
 
 
