@@ -348,6 +348,12 @@ class FairseqTask(object):
             loss, sample_size, logging_output = criterion(model, sample)
         return loss, sample_size, logging_output
 
+    def predict_step(self, sample, model, criterion):
+        model.eval()
+        with torch.no_grad():
+            lprobs = criterion.get_normalized_probs(model, sample)
+        return lprobs
+
     def inference_step(self, generator, models, sample, prefix_tokens=None):
         with torch.no_grad():
             return generator.generate(models, sample, prefix_tokens=prefix_tokens)

@@ -37,6 +37,10 @@ class CrossEntropyCriterion(FairseqCriterion):
         }
         return loss, sample_size, logging_output
 
+    def get_normalized_probs(self, model, sample, reduce=False):
+        net_output = model(**sample['net_input'])
+        return model.get_normalized_probs(net_output, log_probs=True)
+
     def compute_loss(self, model, net_output, sample, reduce=True):
         lprobs = model.get_normalized_probs(net_output, log_probs=True)
         lprobs = lprobs.view(-1, lprobs.size(-1))
