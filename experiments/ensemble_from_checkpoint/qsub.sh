@@ -1,5 +1,7 @@
 #! /usr/bin/env bash
 
+# Note: this doesn't use label smoothing
+
 set -e
 set -u
 
@@ -90,7 +92,7 @@ fairseq-train \
     --warmup-updates 0 \
     --weight-decay 0.0 \
     --dropout 0.1 \
-    --criterion label_smoothed_cross_entropy --label-smoothing 0.1 \
+    --criterion cross_entropy \
     --no-progress-bar \
     --max-tokens 4096 \
     --fp16 \
