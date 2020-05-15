@@ -8,21 +8,24 @@ set -u
 # --- SYSTEM ---
 N_GPU=2  # args must be adjusted below if this is changed
 UPDATE_FREQ=4
-MAX_UPDATE=300000
 GPU_TYPE=2080
 NUM_PROC=20
 MEM=12G
 HOURS=48
 
-if [ $# -lt 2 ]; then
-   echo "Usage: ${0} JOB_NAME CKPT [FLAGS]"
-   exit
+if [ $# -lt 7 ]; then
+    echo "Usage: ${0} JOB_NAME CKPT SAVE_STEPS PERIOD STEPS MIN_LR MAX_LR"
+    echo "Got $# arguments"
+    exit
 fi
 
-JOB_NAME=${1}
-CKPT=${2}
-shift
-shift
+JOB_NAME=${1}  # e.g. e1b
+CKPT=${2}  # e.g. checkpoint60
+SAVE_STEPS=${3}  # e.g. 1999
+PERIOD=${4}  # e.g. 2000
+STEPS=${5}  # e.g. 20000
+MIN_LR=${6}  # e.g. 0.00001
+MAX_LR=${7}  # e.g. 0.001
 
 
 DATA_DIR=/expscratch/nandrews/nmt/fairseq/data/wmt16_en_de_bpe32k
@@ -34,16 +37,19 @@ fi
 JOB_DIR=/expscratch/${USER}/nmt/fairseq/jobs/scaling_nmt/${JOB_NAME}
 if [ ! -d ${JOB_DIR} ]; then
     echo "${JOB_DIR} does not exist"
+    ls /expscratch/${USER}/nmt/fairseq/jobs/scaling_nmt/
     exit
 fi
 
 CKPT_PATH="${JOB_DIR}/${CKPT}.pt"
 if [ ! -f ${CKPT_PATH} ]; then
     echo "${CKPT_PATH} does not exist"
+    ls ${JOB_DIR}
     exit
 fi
 
-ENSEMBLE_DIR=/expscratch/${USER}/nmt/fairseq/jobs/scaling_nmt_ensemble/${JOB_NAME}
+ENSEMBLE_JOB_NAME=${JOB_NAME}_${CKPT}_${SAVE_STEPS}_${PERIOD}_${STEPS}_${MIN_LR}_${MAX_LR}
+ENSEMBLE_DIR=/expscratch/${USER}/nmt/fairseq/jobs/scaling_nmt_ensemble/${ENSEMBLE_JOB_NAME}
 mkdir -p ${ENSEMBLE_DIR}
 JOB_SCRIPT=${ENSEMBLE_DIR}/job.sh
 TRAIN="fairseq-train"
@@ -53,7 +59,7 @@ cat >${JOB_SCRIPT} <<EOL
 #$ -cwd
 #$ -V
 #$ -w e
-#$ -N ${JOB_NAME}_re
+#$ -N ${ENSEMBLE_JOB_NAME}
 #$ -m bea
 #$ -j y
 #$ -o ${JOB_DIR}/out
@@ -80,12 +86,12 @@ fairseq-train \
     --reset-optimizer \
     --reset-meters \
     --log-interval 50 \
-    --save-interval-updates 2000 \
-    --lr-period-updates 2000 \
-    --max-update 20000 \
+    --save-interval-updates ${SAVE_STEPS} \
+    --lr-period-updates ${PERIOD} \
+    --max-update ${STEPS} \
     --optimizer adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 \
-    --lr 0.00001 \
-    --max-lr 0.001 \
+    --lr ${MIN_LR} \
+    --max-lr ${MAX_LR} \
     --lr-scheduler cosine \
     --t-mult 1 \
     --lr-shrink 1 \
@@ -98,7 +104,6 @@ fairseq-train \
     --fp16 \
     --keep-last-epochs 10 \
     --update-freq ${UPDATE_FREQ} \
-    --max-update ${MAX_UPDATE} $@ \
     --log-format json \
     | tee ${ENSEMBLE_DIR}/train.log
 

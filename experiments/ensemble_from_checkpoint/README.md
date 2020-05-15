@@ -1,3 +1,5 @@
+NOTE: In this configuration there are about 4000 steps per epoch.
+
 This experiment proceeds as follows:
 
 1. Load an existing checkpoint.
