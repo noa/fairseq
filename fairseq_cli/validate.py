@@ -9,6 +9,7 @@ import logging
 import sys
 import os
 import numpy as np
+import h5py
 
 import torch
 
@@ -68,7 +69,13 @@ def main(args, override_args=None):
         if os.path.exists(args.full_dist_path):
             print(f"Deleting existing file: {args.full_dist_path}")
             os.remove(args.full_dist_path)
-        dist_output_file = open(args.full_dist_path, 'ab')
+
+        if args.storage_format == 'pickle':
+          dist_output_file = open(args.full_dist_path, 'ab')
+        elif args.storage_format == 'hdf5':
+          dist_output_file = h5py.File(args.full_dist_path, 'w', libver='latest')
+        else:
+          raise ValueError(args.storage_format)
 
     # Move models to GPU
     for model in models:
@@ -91,6 +98,17 @@ def main(args, override_args=None):
             dataset = task.dataset(subset)
         except KeyError:
             raise Exception('Cannot find dataset: ' + subset)
+
+        # How big is the dataset?
+        n_examples = len(dataset)
+        print(f"Number of examples: {n_examples}")
+
+        if args.storage_format == 'hdf5':
+          # Create the datasets
+          lprobs_dataset = dist_output_file.create_dataset("lprobs", (n_examples,),
+                                                           dtype=h5py.vlen_dtype('float32'))
+          indices_dataset = dist_output_file.create_dataset("indices", (n_examples,),
+                                                            dtype=h5py.vlen_dtype('int32'))
 
         # Initialize data iterator
         print(f"Num workers: {args.num_workers}")
@@ -145,15 +163,27 @@ def main(args, override_args=None):
                     #l = kj.shape[0]
                     #if s < l:
                     #  print(f'{s} {l}')
-                    pickle.dump((ids[j], vals[j][kj], inds[j][kj]),
-                                dist_output_file)
+                    if args.storage_format == 'pickle':
+                      pickle.dump((ids[j], vals[j][kj], inds[j][kj]),
+                                  dist_output_file)
+                    elif args.storage_format == 'hdf5':
+                      id_ = ids[j]
+                      lprobs_dataset[id_] = vals[j][kj].flatten()
+                      indices_dataset[id_] = inds[j][kj].flatten()
+                    else:
+                      raise ValueError(args.storage_format)
             else:
                 _loss, _sample_size, log_output = task.valid_step(sample, model, criterion)
                 progress.log(log_output, step=i)
                 log_outputs.append(log_output)
 
         if args.print_full_dist:
-            dist_output_file.close()
+            if args.storage_format == 'pickle':
+                dist_output_file.close()
+            elif args.storage_format == 'hdf5':
+                dist_output_file.close()
+            else:
+                raise ValueError(args.storage_format)
         else:
             with metrics.aggregate() as agg:
                 task.reduce_metrics(log_outputs, criterion)

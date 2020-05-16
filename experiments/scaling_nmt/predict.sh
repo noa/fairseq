@@ -13,7 +13,7 @@ JOB_DIR=/expscratch/${USER}/nmt/fairseq/jobs/scaling_nmt/${JOB_NAME}
 DATA_DIR=/expscratch/nandrews/nmt/fairseq/data/wmt16_en_de_bpe32k
 
 VALIDATE=`realpath ../../validate.py`
-OUTPUT_FILE="${JOB_DIR}/train_${JOB_NAME}_dist.pkl"
+OUTPUT_FILE="${JOB_DIR}/train_${JOB_NAME}_dist.h5"
 TOP_K=32
 
 echo "Output file: ${OUTPUT_FILE}"

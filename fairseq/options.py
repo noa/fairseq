@@ -297,6 +297,8 @@ def add_preprocess_args(parser):
                        help="Pad dictionary size to be multiple of N")
     group.add_argument("--workers", metavar="N", default=1, type=int,
                        help="number of parallel workers")
+    group.add_argument("--teacher-pred", default=None, type=str,
+                       help="Teacher predictive distribution")
     # fmt: on
     return parser
 
@@ -506,6 +508,8 @@ def add_common_eval_args(group):
                        help='threshold on confidences written out (to save disk space)')
     group.add_argument('--full-dist-path', default=None, type=str,
                        help='if set, write to separate file in numpy format')
+    group.add_argument('--storage-format', default='hdf5', type=str,
+                       help='storage format for teacher confidences')
     # fmt: on
 
 
