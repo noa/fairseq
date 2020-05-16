@@ -62,8 +62,8 @@ cat >${JOB_SCRIPT} <<EOL
 #$ -N ${ENSEMBLE_JOB_NAME}
 #$ -m bea
 #$ -j y
-#$ -o ${JOB_DIR}/out
-#$ -e ${JOB_DIR}/err
+#$ -o ${ENSEMBLE_DIR}/out
+#$ -e ${ENSEMBLE_DIR}/err
 
 # Stop on error
 set -e
