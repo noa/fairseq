@@ -139,13 +139,11 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
         targets = sample['teacher_lprobs']
         K = targets.shape[-1]
         targets = targets.view(-1, targets.size(-1, K))
-        soft_targets = smooth(targets, self.temperature)
+        soft_targets = smooth_partial(targets,
+                                      sample["teacher_inds"],
+                                      self.temperature)
 
-        # From the Torch documentation: "As with NLLLoss, the input
-        # given is expected to contain log-probabilities and is not
-        # restricted to a 2D Tensor. The targets are interpreted as
-        # probabilities by default, but could be considered as
-        # log-probabilities with log_target set to True."
+        # Compute KL[teacher(T), student(T)]
         distill_loss = partial_kl_div(soft_targets.detach(),
                                       soft_lprobs,
                                       sample["teacher_inds"])
