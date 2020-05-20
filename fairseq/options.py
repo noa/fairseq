@@ -501,6 +501,10 @@ def add_common_eval_args(group):
     group.add_argument('--results-path', metavar='RESDIR', type=str, default=None,
                        help='path to save eval results (optional)"')
 
+    # measuring calibration
+    group.add_argument('--measure-calibration', action='store_true',
+                       help='Calculate calibration metrics')
+    
     # arguments for distillation
     group.add_argument('--print-full-dist', action='store_true',
                        help='if set, decoding returns the full marginals at each position')

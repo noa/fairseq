@@ -60,9 +60,6 @@ def main(args, override_args=None):
     print("WARNING: Just taking first model from ensemble")
     model = models[0]
 
-    # If we're obtaining full distributions, we need to serialize them
-    # in binary format. We use this strategy:
-    # https://stackoverflow.com/questions/47493409/streaming-multiple-numpy-arrays-to-a-file
     if args.print_full_dist:
         assert args.full_dist_path
         import pickle
@@ -103,7 +100,7 @@ def main(args, override_args=None):
         n_examples = len(dataset)
         print(f"Number of examples: {n_examples}")
 
-        if args.storage_format == 'hdf5':
+        if args.storage_format == 'hdf5' and args.print_full_dist:
           # Create the datasets
           lprobs_dataset = dist_output_file.create_dataset("lprobs", (n_examples,),
                                                            dtype=h5py.vlen_dtype('float32'))
@@ -172,6 +169,13 @@ def main(args, override_args=None):
                       indices_dataset[id_] = inds[j][kj].flatten()
                     else:
                       raise ValueError(args.storage_format)
+            elif args.measure_calibration:
+                target = sample['target']
+                lprobs = task.predict_step(sample, model, criterion).cpu().numpy()
+                keep = np.logical_not(target.eq(criterion.padding_idx).cpu().numpy())
+                log_outputs.append({
+                  'lprobs': lprobs[keep],
+                  'targets': target.cpu().numpy()[keep]})
             else:
                 _loss, _sample_size, log_output = task.valid_step(sample, model, criterion)
                 progress.log(log_output, step=i)
@@ -184,6 +188,22 @@ def main(args, override_args=None):
                 dist_output_file.close()
             else:
                 raise ValueError(args.storage_format)
+        elif args.measure_calibration:
+            # https://github.com/tensorflow/probability/blob/master/tensorflow_probability/python/stats/calibration.py
+            import tensorflow as tf
+            from tensorflow_probability.python.stats.calibration import brier_score
+            from tensorflow_probability.python.stats.calibration import expected_calibration_error
+            labels = np.concatenate([batch['targets'] for batch in log_outputs], 0)
+            logits = np.concatenate([batch['lprobs'] for batch in log_outputs], 0)
+            with tf.device("/cpu:0"):
+              print("Computing Brier score...")
+              print("TODO: Should be computed incrementally to be more memory efficient.")
+              b = tf.reduce_mean(brier_score(labels, logits))
+              print(f"Brier score: {b}")
+              print("Computing ECE...")
+              ece = expected_calibration_error(10, logits=logits,
+                                               labels_true=labels)
+              print(f"ECE: {ece}")
         else:
             with metrics.aggregate() as agg:
                 task.reduce_metrics(log_outputs, criterion)
