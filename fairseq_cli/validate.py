@@ -59,10 +59,13 @@ def main(args, override_args=None):
     # Load ensemble
     logger.info('loading model(s) from {}'.format(args.path))
     models, model_args, task = checkpoint_utils.load_model_ensemble_and_task(
-        [args.path],
+        args.path.split(':'),
         arg_overrides=overrides,
         suffix=getattr(args, "checkpoint_suffix", ""),
     )
+
+    if len(models) > 1:
+        print(f"Loaded ensemble of {len(models)} models")
 
     if args.print_full_dist:
         assert args.full_dist_path

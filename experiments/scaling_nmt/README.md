@@ -1,4 +1,20 @@
-See: https://github.com/pytorch/fairseq/tree/master/examples/scaling_nmt#3-train-a-model
+# Evaluating calibration
+
+The `calibration.sh` script may be used to measure the token-level
+calibration of a single model or an ensemble of models.
+
+``` bash
+./calibration.sh e1b/checkpoint_last.pt e2b/checkpoint_last.pt e3b/checkpoint_last.pt e4b/checkpoint_last.pt e5b/checkpoint_last.pt
+```
+
+Currently, Brier score and ECE are computed. Sample output:
+
+``` bash
+Brier score: -0.560197114944458
+ECE: 0.01955065131187439
+```
+
+# Writing confidences for model distillation
 
 To obtain confidences from trained models, use the `predict.sh` script. This calls
 `fairseq_cli/validate.py` with two additional arguments:
