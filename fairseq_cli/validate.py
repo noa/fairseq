@@ -10,7 +10,7 @@ import sys
 import os
 import numpy as np
 import h5py
-
+from scipy.special import logsumexp
 import torch
 
 from fairseq import checkpoint_utils, distributed_utils, options, utils
@@ -24,6 +24,18 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 logger = logging.getLogger('fairseq_cli.validate')
+
+
+def get_ensemble_lprobs(task, sample, models, criterion):
+    lprobs = []
+    n_models = len(models)
+    for model in models:
+      lp = task.predict_step(sample, model, criterion).cpu().numpy()
+      if n_models < 2:
+        return lp
+      lprobs.append(lp)
+    lprobs = np.stack(lprobs)
+    return logsumexp(lprobs, axis=0, b=float(n_models))
 
 
 def main(args, override_args=None):
@@ -42,12 +54,6 @@ def main(args, override_args=None):
     print(f"Use CPU? {args.cpu}")
     print(f"Use CUDA? {use_cuda}")
 
-    # if override_args is not None:
-    #     print(override_args)
-    #     overrides = vars(override_args)
-    #     overrides.update(eval(getattr(override_args, 'model_overrides', '{}')))
-    # else:
-    #     overrides = None
     overrides = {'criterion': 'cross_entropy'}
 
     # Load ensemble
@@ -57,8 +63,6 @@ def main(args, override_args=None):
         arg_overrides=overrides,
         suffix=getattr(args, "checkpoint_suffix", ""),
     )
-    print("WARNING: Just taking first model from ensemble")
-    model = models[0]
 
     if args.print_full_dist:
         assert args.full_dist_path
@@ -134,21 +138,10 @@ def main(args, override_args=None):
         for i, sample in enumerate(progress):
             sample = utils.move_to_cuda(sample) if use_cuda else sample
             if args.print_full_dist:
-                # IMPORTANT NOTE: Padding is used for sents of diff len
-                #print(criterion.padding_idx)
                 target = sample['target']
-                lprobs = task.predict_step(sample, model, criterion)
+                #lprobs = task.predict_step(sample, model, criterion)
+                lprobs = get_ensemble_lprobs(task, sample, models, criterion)
                 vals, inds = lprobs.topk(args.dist_top_k)
-                #print(vals.shape)
-                #print(inds.shape)
-                #lmass = vals.logsumexp(2)
-                #print(m32.exp().mean())
-                #means.append(lmass.exp().mean().cpu().numpy())
-                #print(np.mean(means))
-                #t64 = lprobs.topk(lprobs, 64)
-                #t128 = lprobs.topk(lprobs, 128)
-                #lprobs = lprobs.cpu().numpy()
-                #print(lprobs.shape)
                 ids = sample['id'].cpu().numpy()
                 keep = np.logical_not(target.eq(criterion.padding_idx).cpu().numpy())
                 vals = vals.cpu().numpy()
@@ -156,10 +149,6 @@ def main(args, override_args=None):
                 n_sentences = ids.shape[0]
                 for j in range(n_sentences):
                     kj = keep[j]
-                    #s = sum(kj)
-                    #l = kj.shape[0]
-                    #if s < l:
-                    #  print(f'{s} {l}')
                     if args.storage_format == 'pickle':
                       pickle.dump((ids[j], vals[j][kj], inds[j][kj]),
                                   dist_output_file)
