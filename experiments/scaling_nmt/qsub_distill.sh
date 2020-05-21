@@ -12,17 +12,21 @@ NUM_PROC=20
 MEM=12G
 HOURS=48
 
-if [ $# -lt 2 ]; then
-   echo "Usage: ${0} JOB_NAME TEACHER [FLAGS]"
+if [ $# -lt 3 ]; then
+   echo "Usage: ${0} JOB_NAME TEACHER TOPK [FLAGS]"
    exit
 fi
 
 TASK=en_de
 JOB_NAME=${1}
 TEACHER=${2}
+TOPK=${3}
+shift
 shift
 shift
 
+T=1.0  # Temperature for distillation
+WEIGHT=0.5  # Weight on the distillation loss vs. NLL
 
 DATA_DIR=/expscratch/nandrews/nmt/fairseq/data/wmt16_en_de_bpe32k
 if [ ! -d "${DATA_DIR}" ]; then
@@ -62,14 +66,17 @@ fairseq-train \
     ${DATA_DIR} \
     --task translation_with_teacher \
     --teacher-pred ${TEACHER} \
+    --teacher-top-k ${TOPK} \
+    --distill-temperature ${T} \
+    --teacher-weight ${WEIGHT} \
     --arch transformer_wmt_en_de --share-all-embeddings \
     --optimizer adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 \
     --lr 0.0007 --lr-scheduler inverse_sqrt --warmup-updates 4000 --warmup-init-lr 1e-07 \
     --weight-decay 0.0 --dropout 0.1 \
-    --criterion label_smoothed_cross_entropy --label-smoothing 0.1 \
+    --criterion distillation_cross_entropy \
     --no-progress-bar \
     --save-dir ${JOB_DIR} \
-    --max-tokens 4096 \
+    --max-tokens 2048 \
     --fp16 \
     --keep-last-epochs 10 \
     --update-freq ${UPDATE_FREQ} \

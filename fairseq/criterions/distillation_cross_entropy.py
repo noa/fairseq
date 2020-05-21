@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
-
+import torch
 import torch.nn.functional as F
 
 from fairseq import metrics, utils
@@ -59,15 +59,15 @@ def smooth_partial(lprobs, inds, temperature):
 
 def partial_kl_div(teacher_lprobs, student_lprobs, inds):
     """Evaluate KL on a subset of events specified by `inds`.
-    
+
     KL[ teacher, student ] =
-  
+
       \sum_{i in inds} teacher[i] * (log(teacher[i]) - log(student[i]))
 
     """
-    log_p = teacher_lprobs[inds]
+    log_p = teacher_lprobs
     p = torch.exp(log_p)
-    log_q = student_lprobs[inds]
+    log_q = student_lprobs.gather(1, inds)
     kl = p * (log_p - log_q)
     return kl.sum(-1)
 
@@ -80,23 +80,27 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
 
     """
 
-    def __init__(self, task, sentence_avg, temperature=1.0,
-                 teacher_weight=0.1):
+    def __init__(self, task, sentence_avg, distill_temperature=1.0,
+                 teacher_weight=0.1, teacher_top_k=None):
         super().__init__(task)
         self.sentence_avg = sentence_avg
-        self.temperature = temperature
-        assert temperature > 1e-5
+        self.temperature = distill_temperature
+        assert self.temperature > 1e-5
         self.teacher_weight = teacher_weight
         assert teacher_weight >= 0 and teacher_weight < 1
+        self.K = teacher_top_k
+        print(f"Teacher top K: {self.K}")
 
     @staticmethod
     def add_args(parser):
         """Add criterion-specific arguments to the parser."""
         # fmt: off
-        parser.add_argument('--temperature', default=1.0, type=float,
-                            help='Temperature for teacher distribution')
+        parser.add_argument('--distill-temperature', default=1.0, type=float,
+                            help='Temperature for distillation')
         parser.add_argument('--teacher-weight', default=0.1, type=float,
                             help='Relative weight of the teacher relative to the NLL')
+        parser.add_argument('--teacher-top-k', default=32, type=int,
+                            help='Top K probabilities in the teacher predictive dist')
         # fmt: on
 
     def forward(self, model, sample, reduce=True):
@@ -125,6 +129,7 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
 
     def compute_loss(self, model, net_output, sample, reduce=True):
         lprobs = model.get_normalized_probs(net_output, log_probs=True)
+        print(f'lprobs shape: {lprobs.shape}')
         lprobs = lprobs.view(-1, lprobs.size(-1))
         target = model.get_targets(sample, net_output).view(-1)
         nll_loss = F.nll_loss(
@@ -136,17 +141,14 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
 
         # Calculate the distillation loss
         soft_lprobs = smooth(lprobs, self.temperature)
-        targets = sample['teacher_lprobs']
-        K = targets.shape[-1]
-        targets = targets.view(-1, targets.size(-1, K))
-        soft_targets = smooth_partial(targets,
-                                      sample["teacher_inds"],
-                                      self.temperature)
+        vals = sample['teacher_vals'].reshape(-1, self.K)
+        inds = sample['teacher_inds'].reshape(-1, self.K)
+        soft_targets = smooth_partial(vals, inds, self.temperature)
 
         # Compute KL[teacher(T), student(T)]
         distill_loss = partial_kl_div(soft_targets.detach(),
                                       soft_lprobs,
-                                      sample["teacher_inds"])
+                                      inds)
 
         # Account for padding
         pad_mask = target.eq(self.padding_idx).reshape(-1)

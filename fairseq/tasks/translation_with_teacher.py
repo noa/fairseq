@@ -185,7 +185,11 @@ class TranslationWithTeacher(TranslationTask):
         # if training split, include teacher predict file
         teacher_file = None
         if split == 'train':
+            print(f"Train split: using teacher file {self.teacher_pred_file}")
             teacher_file = self.teacher_pred_file
+            assert teacher_file
+        else:
+            print(f"{split} split; not using teacher file")
 
         self.datasets[split] = load_langpair_dataset(
             data_path, split, src, self.src_dict, tgt, self.tgt_dict,

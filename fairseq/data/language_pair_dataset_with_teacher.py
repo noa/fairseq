@@ -8,15 +8,17 @@ import h5py
 import numpy as np
 import torch
 
-from . import data_utils, FairseqDataset, LanguagePairDataset
+from fairseq.data import data_utils
+from fairseq.data import FairseqDataset
+from fairseq.data import LanguagePairDataset
 
 logger = logging.getLogger(__name__)
 
 
-def collate_probs(values, left_pad=False):
-    """Convert a list of 2d tensors into a padded 3d tensor."""
+def collate_generic(values, left_pad=False):
+    """Convert a generic list of 1d tensors into a padded 2d tensor."""
     size = max(v.size(0) for v in values)
-    res = values[0].new(len(values), size).fill_(0.)
+    res = values[0].new(len(values), size).fill_(0)
 
     def copy_tensor(src, dst):
         # numel(): Returns the total number of elements in the input tensor.
@@ -92,9 +94,12 @@ def collate(
     else:
         ntokens = sum(len(s['source']) for s in samples)
 
-    teacher = None
-    if samples[0].get('teacher', None) is not None:
-        teacher = XXX
+    teacher_inds = None
+    teacher_vals = None
+    if samples[0].get('teacher_inds', None) is not None:
+        # Note: these are flattened; we need to unflatten to [B, L, K]
+        teacher_inds = collate_generic([s['teacher_inds'] for s in samples])
+        teacher_vals = collate_generic([s['teacher_vals'] for s in samples])
 
     batch = {
         'id': id,
@@ -105,7 +110,8 @@ def collate(
             'src_lengths': src_lengths,
         },
         'target': target,
-        'teacher': teacher
+        'teacher_vals': teacher_vals,
+        'teacher_inds': teacher_inds
     }
     if prev_output_tokens is not None:
         batch['net_input']['prev_output_tokens'] = prev_output_tokens
@@ -196,13 +202,117 @@ class LanguagePairDatasetWithTeacher(LanguagePairDataset):
                          align_dataset=align_dataset, append_bos=append_bos,
                          eos=eos)
 
-        print(f"Loading teacher file: {teacher_file}")
-        if not teacher_file.endswith('.h5'):
+        print(f"Left pad source? {left_pad_source}")
+        print(f"Left pad target? {left_pad_target}")
+
+        if teacher_file:
+          print(f"Loading teacher file: {teacher_file}")
+          if not teacher_file.endswith('.h5'):
             raise ValueError(f"Expected h5 extension: {teacher_file}")
-        self.teacher = h5py.File(teacher_file, 'r')
+          self.teacher = h5py.File(teacher_file, 'r')
+          self.teacher_vals = self.teacher["lprobs"]
+          self.teacher_inds = self.teacher["indices"]
+        else:
+          self.teacher = None
+          print("No teacher file")
+
+    def collater(self, samples):
+        """Merge a list of samples to form a mini-batch.
+
+        Args:
+            samples (List[dict]): samples to collate
+
+        Returns:
+            dict: a mini-batch with the following keys:
+
+                - `id` (LongTensor): example IDs in the original input order
+                - `ntokens` (int): total number of tokens in the batch
+                - `net_input` (dict): the input to the Model, containing keys:
+
+                  - `src_tokens` (LongTensor): a padded 2D Tensor of tokens in
+                    the source sentence of shape `(bsz, src_len)`. Padding will
+                    appear on the left if *left_pad_source* is ``True``.
+                  - `src_lengths` (LongTensor): 1D Tensor of the unpadded
+                    lengths of each source sentence of shape `(bsz)`
+                  - `prev_output_tokens` (LongTensor): a padded 2D Tensor of
+                    tokens in the target sentence, shifted right by one
+                    position for teacher forcing, of shape `(bsz, tgt_len)`.
+                    This key will not be present if *input_feeding* is
+                    ``False``.  Padding will appear on the left if
+                    *left_pad_target* is ``True``.
+
+                - `target` (LongTensor): a padded 2D Tensor of tokens in the
+                  target sentence of shape `(bsz, tgt_len)`. Padding will appear
+                  on the left if *left_pad_target* is ``True``.
+                - `teacher_inds` (LongTensor): a padded 2D Tensor of tokens in
+                  the top K of the teacher predictive distribution
+                - `teacher_vals` (LongTensor): a padded 2D Tensor of log
+                  probabilities in the top K of the teacher predictive distribution
+        """
+        return collate(
+            samples, pad_idx=self.src_dict.pad(), eos_idx=self.eos,
+            left_pad_source=self.left_pad_source, left_pad_target=self.left_pad_target,
+            input_feeding=self.input_feeding,
+        )
+
+    def __getitem__(self, index):
+        tgt_item = self.tgt[index] if self.tgt is not None else None
+        src_item = self.src[index]
+        # Append EOS to end of tgt sentence if it does not have an EOS and remove
+        # EOS from end of src sentence if it exists. This is useful when we use
+        # use existing datasets for opposite directions i.e., when we want to
+        # use tgt_dataset as src_dataset and vice versa
+        if self.append_eos_to_target:
+            eos = self.tgt_dict.eos() if self.tgt_dict else self.src_dict.eos()
+            if self.tgt and self.tgt[index][-1] != eos:
+                tgt_item = torch.cat([self.tgt[index], torch.LongTensor([eos])])
+
+        if self.append_bos:
+            bos = self.tgt_dict.bos() if self.tgt_dict else self.src_dict.bos()
+            if self.tgt and self.tgt[index][0] != bos:
+                tgt_item = torch.cat([torch.LongTensor([bos]), self.tgt[index]])
+
+            bos = self.src_dict.bos()
+            if self.src[index][-1] != bos:
+                src_item = torch.cat([torch.LongTensor([bos]), self.src[index]])
+
+        if self.remove_eos_from_source:
+            eos = self.src_dict.eos()
+            if self.src[index][-1] == eos:
+                src_item = self.src[index][:-1]
+
+        example = {
+            'id': index,
+            'source': src_item,
+            'target': tgt_item
+        }
+
+        if self.teacher is not None:
+          example['teacher_inds'] = torch.tensor(self.teacher_inds[index]).long()
+          example['teacher_vals'] = torch.tensor(self.teacher_vals[index]).float()
+        
+        if self.align_dataset is not None:
+            example['alignment'] = self.align_dataset[index]
+        return example
 
 
 if __name__ == "__main__":
-    filename = ""
-    teacher = h5py.File(filename 'r')
-    teacher[""]
+    filename = "/expscratch/nandrews/nmt/fairseq/jobs/scaling_nmt/e1b/train_e1b_dist.h5"
+    file_handle = h5py.File(filename, 'r')
+    vals_ds = file_handle["lprobs"]
+    inds_ds = file_handle["indices"]
+    import numpy as np
+
+    sample = []
+    for i in np.random.randint(1000, size=(5)):
+      sample.append({
+        'vals': torch.tensor(vals_ds[i]).float(),
+        'inds': torch.tensor(inds_ds[i]).long()
+      })
+
+    result = collate_generic([s['vals'] for s in sample])
+    print(result.shape)
+    print(result[0][:5])
+    result = collate_generic([s['inds'] for s in sample])
+    print(result.shape)
+    print(result[0][:5])
