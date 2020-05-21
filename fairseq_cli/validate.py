@@ -35,7 +35,7 @@ def get_ensemble_lprobs(task, sample, models, criterion):
         return lp
       lprobs.append(lp.astype(np.float32))
     lprobs = np.stack(lprobs)
-    return logsumexp(lprobs, axis=0, b=float(n_models))
+    return logsumexp(lprobs, axis=0, b=float(n_models)).astype(np.float32)
 
 
 def main(args, override_args=None):

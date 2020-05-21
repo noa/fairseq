@@ -186,7 +186,7 @@ class TranslationWithTeacher(TranslationTask):
         teacher_file = None
         if split == 'train':
             teacher_file = self.teacher_pred_file
-        
+
         self.datasets[split] = load_langpair_dataset(
             data_path, split, src, self.src_dict, tgt, self.tgt_dict,
             combine=combine, dataset_impl=self.args.dataset_impl,

@@ -4,13 +4,29 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
-
+import h5py
 import numpy as np
 import torch
 
 from . import data_utils, FairseqDataset, LanguagePairDataset
 
 logger = logging.getLogger(__name__)
+
+
+def collate_probs(values, left_pad=False):
+    """Convert a list of 2d tensors into a padded 3d tensor."""
+    size = max(v.size(0) for v in values)
+    res = values[0].new(len(values), size).fill_(0.)
+
+    def copy_tensor(src, dst):
+        # numel(): Returns the total number of elements in the input tensor.
+        assert dst.numel() == src.numel()
+        dst.copy_(src)
+
+    for i, v in enumerate(values):
+        copy_tensor(v, res[i][size - len(v):] if left_pad else res[i][:len(v)])
+
+    return res
 
 
 def collate(
@@ -76,6 +92,10 @@ def collate(
     else:
         ntokens = sum(len(s['source']) for s in samples)
 
+    teacher = None
+    if samples[0].get('teacher', None) is not None:
+        teacher = XXX
+
     batch = {
         'id': id,
         'nsentences': len(samples),
@@ -85,6 +105,7 @@ def collate(
             'src_lengths': src_lengths,
         },
         'target': target,
+        'teacher': teacher
     }
     if prev_output_tokens is not None:
         batch['net_input']['prev_output_tokens'] = prev_output_tokens
@@ -175,4 +196,13 @@ class LanguagePairDatasetWithTeacher(LanguagePairDataset):
                          align_dataset=align_dataset, append_bos=append_bos,
                          eos=eos)
 
-        self.teacher_file = teacher_file
+        print(f"Loading teacher file: {teacher_file}")
+        if not teacher_file.endswith('.h5'):
+            raise ValueError(f"Expected h5 extension: {teacher_file}")
+        self.teacher = h5py.File(teacher_file, 'r')
+
+
+if __name__ == "__main__":
+    filename = ""
+    teacher = h5py.File(filename 'r')
+    teacher[""]
