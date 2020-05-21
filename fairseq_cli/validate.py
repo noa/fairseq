@@ -33,7 +33,7 @@ def get_ensemble_lprobs(task, sample, models, criterion):
       lp = task.predict_step(sample, model, criterion).cpu().numpy()
       if n_models < 2:
         return lp
-      lprobs.append(lp)
+      lprobs.append(lp.astype(np.float32))
     lprobs = np.stack(lprobs)
     return logsumexp(lprobs, axis=0, b=float(n_models))
 
@@ -137,6 +137,9 @@ def main(args, override_args=None):
             default_log_format=('tqdm' if not args.no_progress_bar else 'simple'),
         )
 
+        if args.measure_calibration:
+            print("Measuring calibration...")
+
         log_outputs = []
         for i, sample in enumerate(progress):
             sample = utils.move_to_cuda(sample) if use_cuda else sample
@@ -163,7 +166,8 @@ def main(args, override_args=None):
                       raise ValueError(args.storage_format)
             elif args.measure_calibration:
                 target = sample['target']
-                lprobs = task.predict_step(sample, model, criterion).cpu().numpy()
+                #lprobs = task.predict_step(sample, model, criterion).cpu().numpy()
+                lprobs = get_ensemble_lprobs(task, sample, models, criterion)
                 keep = np.logical_not(target.eq(criterion.padding_idx).cpu().numpy())
                 log_outputs.append({
                   'lprobs': lprobs[keep],
