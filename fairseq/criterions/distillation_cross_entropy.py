@@ -24,7 +24,7 @@ def smooth(lprobs, temperature):
       return lprobs
 
     lprobs = lprobs * temperature  # p^T
-    return lprobs - F.logsumexp(lprobs)  # renormalize
+    return lprobs - torch.logsumexp(lprobs, 1)  # renormalize
 
 
 def smooth_partial(lprobs, inds, temperature):
@@ -170,7 +170,7 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
 
         # According to [1]: "We found that the best results were
         # generally obtained by using a condiderably lower weight on
-        # the second objective function."
+        # the [NLL loss]."
         loss = (1. - self.teacher_weight) * nll_loss + self.teacher_weight * distill_loss_scaled
 
         return loss, nll_loss

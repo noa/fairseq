@@ -205,11 +205,15 @@ class LanguagePairDatasetWithTeacher(LanguagePairDataset):
         print(f"Left pad source? {left_pad_source}")
         print(f"Left pad target? {left_pad_target}")
 
-        if teacher_file:
-          print(f"Loading teacher file: {teacher_file}")
-          if not teacher_file.endswith('.h5'):
-            raise ValueError(f"Expected h5 extension: {teacher_file}")
-          self.teacher = h5py.File(teacher_file, 'r')
+        self.teacher_file = teacher_file
+        self.teacher = None
+
+    def open_teacher_file(self):
+        if self.teacher_file:
+          print(f"Loading teacher file: {self.teacher_file}")
+          if not self.teacher_file.endswith('.h5'):
+            raise ValueError(f"Expected h5 extension: {self.teacher_file}")
+          self.teacher = h5py.File(self.teacher_file, 'r')
           self.teacher_vals = self.teacher["lprobs"]
           self.teacher_inds = self.teacher["indices"]
         else:
@@ -287,9 +291,12 @@ class LanguagePairDatasetWithTeacher(LanguagePairDataset):
             'target': tgt_item
         }
 
+        if self.teacher_file and self.teacher is None:
+            self.open_teacher_file()
+        
         if self.teacher is not None:
-          example['teacher_inds'] = torch.tensor(self.teacher_inds[index]).long()
-          example['teacher_vals'] = torch.tensor(self.teacher_vals[index]).float()
+            example['teacher_inds'] = torch.tensor(self.teacher_inds[index]).long()
+            example['teacher_vals'] = torch.tensor(self.teacher_vals[index]).float()
         
         if self.align_dataset is not None:
             example['alignment'] = self.align_dataset[index]
