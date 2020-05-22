@@ -129,7 +129,6 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
 
     def compute_loss(self, model, net_output, sample, reduce=True):
         lprobs = model.get_normalized_probs(net_output, log_probs=True)
-        print(f'lprobs shape: {lprobs.shape}')
         lprobs = lprobs.view(-1, lprobs.size(-1))
         target = model.get_targets(sample, net_output).view(-1)
         nll_loss = F.nll_loss(
@@ -139,6 +138,10 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
             reduction='sum' if reduce else 'none',
         )
 
+        # For test / validation, we just return the nll loss
+        if sample['teacher_vals'] is None:
+            return nll_loss, nll_loss
+        
         # Calculate the distillation loss
         soft_lprobs = smooth(lprobs, self.temperature)
         vals = sample['teacher_vals'].reshape(-1, self.K)

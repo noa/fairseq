@@ -37,6 +37,20 @@ def get_ensemble_lprobs(task, sample, models, criterion):
     lprobs = np.stack(lprobs)
     return logsumexp(lprobs, axis=0, b=float(n_models)).astype(np.float32)
 
+def log_sum_exp(value, weights, dim=None, eps=1e-20):
+    m, idx = torch.max(value, dim=dim, keepdim=True)
+    return m.squeeze(dim) + torch.log(torch.sum(torch.exp(value - m) * weights,
+                                                dim=dim) + eps)
+  
+def fast_ensemble_lprobs(task, sample, models, criterion):
+    lprobs = []
+    for model in models:
+      lp = task.predict_step(sample, model, criterion)
+      lprobs.append(lp)
+    lprobs = torch.stack(lprobs)
+    weights = torch.ones_like(lprobs) * (1. / lprobs.size(0))
+    return log_sum_exp(lprobs, weights, dim=0)
+
 
 def main(args, override_args=None):
     utils.import_user_module(args)
@@ -145,9 +159,14 @@ def main(args, override_args=None):
             sample = utils.move_to_cuda(sample) if use_cuda else sample
             if args.print_full_dist:
                 target = sample['target']
-                #lprobs = task.predict_step(sample, model, criterion)
-                lprobs = get_ensemble_lprobs(task, sample, models, criterion)
+
+                #lprobs = task.predict_step(sample, models[0], criterion)
+                #vals, inds = lprobs.topk(args.dist_top_k)
+
+                # This version is potentially quite slow, despite the name
+                lprobs = fast_ensemble_lprobs(task, sample, models, criterion)
                 vals, inds = lprobs.topk(args.dist_top_k)
+                
                 ids = sample['id'].cpu().numpy()
                 keep = np.logical_not(target.eq(criterion.padding_idx).cpu().numpy())
                 vals = vals.cpu().numpy()

@@ -40,7 +40,7 @@ python ${VALIDATE} ${DATA_DIR} \
        --valid-subset ${DATA_DIR}/train \
        --full-dist-path ${OUTPUT_FILE} \
        --path ${CHECKPOINTS} \
-       --max-tokens 8000 \
+       --max-tokens 2048 \
        --print-full-dist \
        --dist-top-k ${TOP_K} \
        --fp16 \
