@@ -24,7 +24,7 @@ def smooth(lprobs, temperature):
       return lprobs
 
     lprobs = lprobs * temperature  # p^T
-    return lprobs - torch.logsumexp(lprobs, 1)  # renormalize
+    return lprobs - torch.logsumexp(lprobs, 1, keepdim=True)  # renormalize
 
 
 def smooth_partial(lprobs, inds, temperature):
