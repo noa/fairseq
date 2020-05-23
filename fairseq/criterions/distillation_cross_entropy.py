@@ -21,13 +21,13 @@ def smooth(lprobs, temperature):
     """
 
     if temperature == 1.0:
-      return lprobs
+        return lprobs
 
     lprobs = lprobs * temperature  # p^T
     return lprobs - torch.logsumexp(lprobs, 1, keepdim=True)  # renormalize
 
 
-def smooth_partial(lprobs, inds, temperature):
+def smooth_partial(lprobs, temperature):
     """lprobs (N x K): N sets of K log probabilities
         inds (N x K): N sets indices corresponding to the C events of `lprobs`
         temperature (float): temperature to smooth the distributions
@@ -48,7 +48,7 @@ def smooth_partial(lprobs, inds, temperature):
     """
 
     if temperature == 1.0:
-        return lprobs
+       return lprobs
 
     log_mass = torch.logsumexp(lprobs, -1)
     log_remainder = torch.log(1. - torch.exp(log_mass))
@@ -90,6 +90,8 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
         assert teacher_weight >= 0 and teacher_weight < 1
         self.K = teacher_top_k
         print(f"Teacher top K: {self.K}")
+        print(f"Distill temp: {self.temperature}")
+        print(f"Teacher weight: {self.teacher_weight}")
 
     @staticmethod
     def add_args(parser):
@@ -146,7 +148,7 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
         soft_lprobs = smooth(lprobs, self.temperature)
         vals = sample['teacher_vals'].reshape(-1, self.K)
         inds = sample['teacher_inds'].reshape(-1, self.K)
-        soft_targets = smooth_partial(vals, inds, self.temperature)
+        soft_targets = smooth_partial(vals, self.temperature)
 
         # Compute KL[teacher(T), student(T)]
         distill_loss = partial_kl_div(soft_targets.detach(),
@@ -154,8 +156,8 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
                                       inds)
 
         # Account for padding
-        pad_mask = target.eq(self.padding_idx).reshape(-1)
-        distill_loss.masked_fill_(pad_mask, 0.)
+        not_pad_mask = target.ne(self.padding_idx).reshape(-1)
+        distill_loss = distill_loss[not_pad_mask]
         if reduce:
             distill_loss = distill_loss.sum()
 
