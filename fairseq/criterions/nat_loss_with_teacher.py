@@ -65,7 +65,13 @@ class LabelSmoothedDualImitationCriterionWithTeacher(FairseqCriterion):
                 else x.float().mean(dim).type_as(x)
             )
         if masks is not None:
+            print("pre mask shapes")
+            print(outputs.shape)
+            print(targets.shape)
             outputs, targets = outputs[masks], targets[masks]
+            print("post mask shapes")
+            print(outputs.shape)
+            print(targets.shape)
 
         if masks is not None and not masks.any():  # if everything is masked
             nll_loss = torch.tensor(0)
@@ -89,18 +95,19 @@ class LabelSmoothedDualImitationCriterionWithTeacher(FairseqCriterion):
             # Maybe include distillation loss
             if teacher_vals is not None:
                 # Calculate the distillation loss
+                B = masks.shape[0]
+                T = masks.shape[1]
+                
+                # Logits is already flat
                 soft_lprobs = smooth(logits, self.temperature)
-                vals = teacher_vals.reshape(-1, self.K)
-                inds = teacher_inds.reshape(-1, self.K)
+                vals = teacher_vals.reshape(B, T, self.K)[masks]
+                inds = teacher_inds.reshape(B, T, self.K)[masks]
                 soft_targets = smooth_partial(vals, self.temperature)
 
                 # Compute KL[teacher(T), student(T)]
                 distill_loss = partial_kl_div(soft_targets.detach(),
                                               soft_lprobs,
                                               inds)
-
-                # Account for padding
-                distill_loss = distill_loss[masks]
 
                 # According to [1]: "Since the magnitudes of the gradients
                 # produced by the soft targets scale as 1/(T^2) it is

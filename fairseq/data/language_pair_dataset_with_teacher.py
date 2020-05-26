@@ -15,6 +15,54 @@ from fairseq.data import LanguagePairDataset
 logger = logging.getLogger(__name__)
 
 
+def collate_3d(values):
+    """Input: List of N 3d tensors with different lengths and uniform
+    remaining dims D1, D2
+    
+    Output: 4d tensor with shape [N, T, D1, D2]
+
+    """
+  
+    max_len = max(v.size(0) for v in values)
+    res = torch.zeros(len(values),
+                      max_len,
+                      values[0].size(1),
+                      values[0].size(2)).type(values[0].type())
+
+    def copy_tensor(src, dst):
+        assert dst.numel() == src.numel()
+        dst.copy_(src)
+
+    for i, v in enumerate(values):
+        t = v.size(0)
+        copy_tensor(v, res[i][:t])
+
+    return res
+
+
+def collate_2d(values):
+    """Input: List of N 2d tensors with different lengths and uniform
+    last dim D
+    
+    Output: 3d tensor with shape [N, T, D]
+
+    """
+  
+    max_len = max(v.size(0) for v in values)
+    last_dim = values[0].size(1)
+    res = torch.zeros(len(values), max_len, last_dim)
+
+    def copy_tensor(src, dst):
+        assert dst.numel() == src.numel()
+        dst.copy_(src)
+
+    for i, v in enumerate(values):
+        t = v.size(0)
+        copy_tensor(v, res[i][:t])
+
+    return res
+
+
 def collate_generic(values, left_pad=False):
     """Convert a generic list of 1d tensors into a padded 2d tensor."""
     size = max(v.size(0) for v in values)
@@ -98,8 +146,18 @@ def collate(
     teacher_vals = None
     if samples[0].get('teacher_inds', None) is not None:
         # Note: these are flattened; we need to unflatten to [B, L, K]
-        teacher_inds = collate_generic([s['teacher_inds'] for s in samples])
-        teacher_vals = collate_generic([s['teacher_vals'] for s in samples])
+        ndim = samples[0]['teacher_inds'].dim()
+        if ndim == 3:
+          teacher_inds = collate_3d([s['teacher_inds'] for s in samples])
+          teacher_vals = collate_3d([s['teacher_vals'] for s in samples])
+        elif ndim == 2:
+          teacher_inds = collate_2d([s['teacher_inds'] for s in samples])
+          teacher_vals = collate_2d([s['teacher_vals'] for s in samples])
+        elif ndim == 1:
+          teacher_inds = collate_generic([s['teacher_inds'] for s in samples])
+          teacher_vals = collate_generic([s['teacher_vals'] for s in samples])
+        else:
+          raise ValueError(ndim)
 
     batch = {
         'id': id,
@@ -176,6 +234,7 @@ class LanguagePairDatasetWithTeacher(LanguagePairDataset):
         append_bos (bool, optional): if set, appends bos to the beginning of
             source/target sentence.
         teacher_file: file with teacher predictions
+        top_k: top k values from experts
 
     """
 
@@ -188,7 +247,7 @@ class LanguagePairDatasetWithTeacher(LanguagePairDataset):
         remove_eos_from_source=False, append_eos_to_target=False,
         align_dataset=None,
         append_bos=False, eos=None,
-        teacher_file=None
+        teacher_file=None, top_k=None
     ):
         super().__init__(src, src_sizes, src_dict, tgt=tgt,
                          tgt_sizes=tgt_sizes, tgt_dict=tgt_dict,
@@ -205,6 +264,7 @@ class LanguagePairDatasetWithTeacher(LanguagePairDataset):
         print(f"Left pad source? {left_pad_source}")
         print(f"Left pad target? {left_pad_target}")
 
+        self.top_k = top_k
         self.teacher_file = teacher_file
         self.teacher = None
 
@@ -213,9 +273,22 @@ class LanguagePairDatasetWithTeacher(LanguagePairDataset):
           print(f"Loading teacher file: {self.teacher_file}")
           if not self.teacher_file.endswith('.h5'):
             raise ValueError(f"Expected h5 extension: {self.teacher_file}")
-          self.teacher = h5py.File(self.teacher_file, 'r')
-          self.teacher_vals = self.teacher["lprobs"]
-          self.teacher_inds = self.teacher["indices"]
+
+          files = self.teacher_file.split(':')
+
+          if len(files) == 1:
+            self.teacher = h5py.File(self.teacher_file, 'r')
+            self.teacher_vals = self.teacher["lprobs"]
+            self.teacher_inds = self.teacher["indices"]
+          else:
+            self.teacher = []
+            self.teacher_vals = []
+            self.teacher_inds = []
+            for file_ in files:
+              handle = h5py.File(file_, 'r')
+              self.teacher_vals.append(handle["lprobs"])
+              self.teacher_inds.append(handle["indices"])
+              self.teacher.append(handle)  # so we keep it open
         else:
           self.teacher = None
           print("No teacher file")
@@ -295,8 +368,18 @@ class LanguagePairDatasetWithTeacher(LanguagePairDataset):
             self.open_teacher_file()
         
         if self.teacher is not None:
-            example['teacher_inds'] = torch.tensor(self.teacher_inds[index]).long()
-            example['teacher_vals'] = torch.tensor(self.teacher_vals[index]).float()
+            if isinstance(self.teacher, list):
+                # time x expert x event
+                inds = [teacher_inds[index] for teacher_inds in self.teacher_inds]
+                example['teacher_inds'] = torch.stack(
+                  [torch.LongTensor(i).reshape(-1, self.top_k) for i in inds], 1)
+
+                vals = [teacher_vals[index] for teacher_vals in self.teacher_vals]
+                example['teacher_vals'] = torch.stack(
+                  [torch.FloatTensor(v).reshape(-1, self.top_k) for v in vals], 1)
+            else:
+                example['teacher_inds'] = torch.tensor(self.teacher_inds[index]).long()
+                example['teacher_vals'] = torch.tensor(self.teacher_vals[index]).float()
         
         if self.align_dataset is not None:
             example['alignment'] = self.align_dataset[index]

@@ -46,6 +46,8 @@ def fast_ensemble_lprobs(task, sample, models, criterion):
     lprobs = []
     for model in models:
       lp = task.predict_step(sample, model, criterion)
+      if len(models) < 2:
+        return lp
       lprobs.append(lp)
     lprobs = torch.stack(lprobs)
     weights = torch.ones_like(lprobs) * (1. / lprobs.size(0))

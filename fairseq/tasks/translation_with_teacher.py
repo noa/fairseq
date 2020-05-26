@@ -39,7 +39,7 @@ def load_langpair_dataset(
     left_pad_source, left_pad_target, max_source_positions,
     max_target_positions, prepend_bos=False, load_alignments=False,
     truncate_source=False, append_source_id=False,
-    teacher_file=None
+    teacher_file=None, top_k=None
 ):
 
     def split_exists(split, src, tgt, lang, data_path):
@@ -127,7 +127,8 @@ def load_langpair_dataset(
         max_source_positions=max_source_positions,
         max_target_positions=max_target_positions,
         align_dataset=align_dataset, eos=eos,
-        teacher_file=teacher_file
+        teacher_file=teacher_file,
+        top_k=top_k
     )
 
 
@@ -159,14 +160,13 @@ class TranslationWithTeacher(TranslationTask):
         # fmt: off
         TranslationTask.add_args(parser)
         parser.add_argument('--teacher-pred', required=True,
-                            help='Path to teacher distribution')
+                            help='Path(s) to teacher distribution(s)')
         # fmt: on
 
     def __init__(self, args, src_dict, tgt_dict):
         super().__init__(args, src_dict, tgt_dict)
 
         # Open the teacher predictions file
-        #self.teacher_pred_file = h5py.File(args.teacher_pred, 'r')
         self.teacher_pred_file = args.teacher_pred
 
     def load_dataset(self, split, epoch=1, combine=False, **kwargs):
@@ -201,5 +201,6 @@ class TranslationWithTeacher(TranslationTask):
             max_target_positions=self.args.max_target_positions,
             load_alignments=self.args.load_alignments,
             truncate_source=self.args.truncate_source,
-            teacher_file=teacher_file
+            teacher_file=teacher_file,
+            top_k=self.args.teacher_top_k
         )
