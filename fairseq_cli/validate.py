@@ -12,6 +12,7 @@ import numpy as np
 import h5py
 from scipy.special import logsumexp
 import torch
+from sklearn.calibration import calibration_curve
 
 from fairseq import checkpoint_utils, distributed_utils, options, utils
 from fairseq.logging import metrics, progress_bar
@@ -25,6 +26,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger('fairseq_cli.validate')
 
+def top_n_ece(labels, lprobs, top_n=1, bins=10):
+    """ Computes ECE of top n predictions per token """
+    top_labels = np.zeros((len(labels), top_n))
+    top_probs = np.zeros_like(top_labels)
+    for i, label in enumerate(labels):
+      ind = np.argpartition(lprobs[i, :], -top_n)[-top_n:]
+      top_labels[i, :] = np.where(ind == label, 1.0, 0.0)
+      top_probs[i, :] = lprobs[i, :][ind]
+    top_probs = np.exp(top_probs)
+    fop, mpv = calibration_curve(top_labels.flatten(),
+                                 top_probs.flatten(),
+                                 strategy='quantile',
+                                 n_bins=bins)
+    ece = np.mean(np.abs(fop - mpv))
+    return ece
 
 def get_ensemble_lprobs(task, sample, models, criterion):
     lprobs = []
@@ -35,13 +51,13 @@ def get_ensemble_lprobs(task, sample, models, criterion):
         return lp
       lprobs.append(lp.astype(np.float32))
     lprobs = np.stack(lprobs)
-    return logsumexp(lprobs, axis=0, b=float(n_models)).astype(np.float32)
+    return logsumexp(lprobs, axis=0, b=float(1. / n_models)).astype(np.float32)
 
 def log_sum_exp(value, weights, dim=None, eps=1e-20):
     m, idx = torch.max(value, dim=dim, keepdim=True)
     return m.squeeze(dim) + torch.log(torch.sum(torch.exp(value - m) * weights,
                                                 dim=dim) + eps)
-  
+
 def fast_ensemble_lprobs(task, sample, models, criterion):
     lprobs = []
     for model in models:
@@ -166,7 +182,7 @@ def main(args, override_args=None):
                 # This version is potentially quite slow, despite the name
                 lprobs = fast_ensemble_lprobs(task, sample, models, criterion)
                 vals, inds = lprobs.topk(args.dist_top_k)
-                
+
                 ids = sample['id'].cpu().numpy()
                 keep = np.logical_not(target.eq(criterion.padding_idx).cpu().numpy())
                 vals = vals.cpu().numpy()
@@ -205,20 +221,30 @@ def main(args, override_args=None):
                 raise ValueError(args.storage_format)
         elif args.measure_calibration:
             # https://github.com/tensorflow/probability/blob/master/tensorflow_probability/python/stats/calibration.py
-            import tensorflow as tf
-            from tensorflow_probability.python.stats.calibration import brier_score
-            from tensorflow_probability.python.stats.calibration import expected_calibration_error
+            #import tensorflow as tf
+            #from tensorflow_probability.python.stats.calibration import brier_score
+            #from tensorflow_probability.python.stats.calibration import expected_calibration_error_quantiles
+            from sklearn.metrics import brier_score_loss
             labels = np.concatenate([batch['targets'] for batch in log_outputs], 0)
             logits = np.concatenate([batch['lprobs'] for batch in log_outputs], 0)
-            with tf.device("/cpu:0"):
-              print("Computing Brier score...")
-              print("TODO: Should be computed incrementally to be more memory efficient.")
-              b = tf.reduce_mean(brier_score(labels, logits))
-              print(f"Brier score: {b}")
-              print("Computing ECE...")
-              ece = expected_calibration_error(10, logits=logits,
-                                               labels_true=labels)
-              print(f"ECE: {ece}")
+            #with tf.device("/cpu:0"):
+            print("Computing Brier score...")
+            #print("TODO: Should be computed incrementally to be more memory efficient.")
+            b = 0
+            for i, label in enumerate(labels):
+              b += brier_score_loss([1.0], [min(1.0, np.exp(logits[i, label]))])
+            b /= len(labels)
+            print(f"Brier score +: {b}")
+              #print("Computing ECE...")
+              #ece = expected_calibration_error_quantiles(hit=labels, pred_log_prob=logits,
+              #                                 num_buckets=10)
+              #print(f"ECE: {ece}")
+            print("Computing Top 1 ECE...")
+            ece_1 = top_n_ece(labels, logits, top_n=1)
+            print(f"Top 1 ECE: {ece_1}")
+            print("Computing Top 5 ECE...")
+            ece_5 = top_n_ece(labels, logits, top_n=5)
+            print(f"Top 5 ECE: {ece_5}")
         else:
             with metrics.aggregate() as agg:
                 task.reduce_metrics(log_outputs, criterion)
