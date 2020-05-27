@@ -13,8 +13,9 @@ from fairseq.tasks.translation import TranslationTask
 from fairseq.tasks.translation_with_teacher import load_langpair_dataset
 from fairseq import utils
 
+
 @register_task('translation_lev_with_teacher')
-class TranslationLevenshteinTask(TranslationTask):
+class TranslationLevenshteinTaskWithTeacher(TranslationTask):
     """
     Translation (Sequence Generation) task for Levenshtein Transformer
     See `"Levenshtein Transformer" <https://arxiv.org/abs/1905.11006>`_.
@@ -29,7 +30,7 @@ class TranslationLevenshteinTask(TranslationTask):
             '--noise',
             default='random_delete',
             choices=['random_delete', 'random_mask', 'no_noise', 'full_mask'])
-        parser.add_argument('--teacher-pred', required=True,
+        parser.add_argument('--teacher-pred', required=True, type=str,
                             help='Path to teacher distribution')
         # fmt: on
 
@@ -49,8 +50,8 @@ class TranslationLevenshteinTask(TranslationTask):
         # if training split, include teacher predict file
         teacher_file = None
         if split == 'train':
-            print(f"Train split: using teacher file {self.teacher_pred_file}")
-            teacher_file = self.teacher_pred_file
+            print(f"Train split: using teacher file {self.args.teacher_pred}")
+            teacher_file = self.args.teacher_pred
             assert teacher_file
         else:
             print(f"{split} split; not using teacher file")

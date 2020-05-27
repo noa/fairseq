@@ -23,14 +23,13 @@ def smooth(lprobs, temperature):
     if temperature == 1.0:
         return lprobs
 
-    lprobs = lprobs * temperature  # p^T
-    return lprobs - torch.logsumexp(lprobs, 1, keepdim=True)  # renormalize
+    ann = lprobs * temperature  # p^T
+    return ann - torch.logsumexp(ann, 1, keepdim=True)  # renormalize
 
 
 def smooth_partial(lprobs, temperature):
     """lprobs (N x K): N sets of K log probabilities
-        inds (N x K): N sets indices corresponding to the C events of `lprobs`
-        temperature (float): temperature to smooth the distributions
+       temperature (float): temperature to smooth the distributions
 
     This is a version of temperature annealing that "does the right
     thing" when the distribution being smoothed is partially specified
@@ -69,7 +68,15 @@ def partial_kl_div(teacher_lprobs, student_lprobs, inds):
     p = torch.exp(log_p)
     log_q = student_lprobs.gather(1, inds)
     kl = p * (log_p - log_q)
+    kl[(p == 0).expand_as(kl)] = 0
     return kl.sum(-1)
+
+
+def partial_mse(teacher_lprobs, student_lprobs, inds):
+    p = torch.exp(teacher_lprobs)
+    q = torch.exp(student_lprobs.gather(1, inds))
+    sqdiff = (p - q) ** 2
+    return sqdiff.sum(-1)
 
 
 @register_criterion('distillation_cross_entropy')
@@ -81,7 +88,9 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
     """
 
     def __init__(self, task, sentence_avg, distill_temperature=1.0,
-                 teacher_weight=0.1, teacher_top_k=None):
+                 teacher_weight=0.1, teacher_top_k=None,
+                 distill_divergence='mse',
+                 distill_loss_type='separate'):
         super().__init__(task)
         self.sentence_avg = sentence_avg
         self.temperature = distill_temperature
@@ -89,9 +98,13 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
         self.teacher_weight = teacher_weight
         assert teacher_weight >= 0 and teacher_weight < 1
         self.K = teacher_top_k
+        self.divergence = distill_divergence
+        self.loss_type = distill_loss_type
+        print(f"Divergence: {self.divergence}")
         print(f"Teacher top K: {self.K}")
         print(f"Distill temp: {self.temperature}")
         print(f"Teacher weight: {self.teacher_weight}")
+        print(f"Loss type: {self.loss_type}")
 
     @staticmethod
     def add_args(parser):
@@ -103,6 +116,11 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
                             help='Relative weight of the teacher relative to the NLL')
         parser.add_argument('--teacher-top-k', default=32, type=int,
                             help='Top K probabilities in the teacher predictive dist')
+        parser.add_argument('--distill-divergence', default='mse', choices=['mse', 'kl'],
+                            help='Divergence between distributions')
+        parser.add_argument('--distill-loss-type', default='separate',
+                            choices=['separate', 'combined'],
+                            help='Loss type')
         # fmt: on
 
     def forward(self, model, sample, reduce=True):
@@ -145,15 +163,37 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
             return nll_loss, nll_loss
         
         # Calculate the distillation loss
-        soft_lprobs = smooth(lprobs, self.temperature)
-        vals = sample['teacher_vals'].reshape(-1, self.K)
-        inds = sample['teacher_inds'].reshape(-1, self.K)
-        soft_targets = smooth_partial(vals, self.temperature)
+        if self.loss_type == 'combined':
+          soft_lprobs = smooth(lprobs, self.temperature)
+          vals = sample['teacher_vals'].reshape(-1, self.K)
+          inds = sample['teacher_inds'].reshape(-1, self.K)
+          soft_targets = smooth_partial(vals, self.temperature)
 
-        # Compute KL[teacher(T), student(T)]
-        distill_loss = partial_kl_div(soft_targets.detach(),
-                                      soft_lprobs,
-                                      inds)
+          # Compute KL[teacher(T), student(T)]
+          distill_loss = None
+          if self.divergence == 'mse':
+            distill_loss = partial_mse(soft_targets.detach(),
+                                       soft_lprobs,
+                                       inds)
+          elif self.divergence == 'kl':
+            distill_loss = partial_kl_div(soft_targets.detach(),
+                                          soft_lprobs,
+                                          inds)
+        elif self.loss_type == 'separate':
+          n_models = sample['teacher_vals'].size(2)
+          # batch x time x model x subword
+          vals = torch.unbind(sample['teacher_vals'], 2)
+          inds = torch.unbind(sample['teacher_inds'], 2)
+          # TODO: implement temperature scaling
+          # TODO: implement support for KL
+          distill_losses = []
+          for val, ind in zip(vals, inds):
+            # batch x time x subword
+            distill_losses.append(
+              partial_mse(val.reshape(-1, self.K).detach(),
+                          lprobs,
+                          ind.reshape(-1, self.K)))
+          distill_loss = torch.stack(distill_losses, 0).sum(0) / n_models
 
         # Account for padding
         not_pad_mask = target.ne(self.padding_idx).reshape(-1)
@@ -161,19 +201,10 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
         if reduce:
             distill_loss = distill_loss.sum()
 
-        # According to [1]: "Since the magnitudes of the gradients
-        # produced by the soft targets scale as 1/(T^2) it is
-        # important to multiply them by T^2 when using both hard and
-        # soft targets. This ensures that the relative contributions
-        # of the hard and soft targets remain roughly unchanged if the
-        # temperature used for distillation is changed while
-        # experimenting with meta-parameters."
-        distill_loss_scaled = distill_loss * self.temperature ** 2
-
         # According to [1]: "We found that the best results were
         # generally obtained by using a condiderably lower weight on
         # the [NLL loss]."
-        loss = (1. - self.teacher_weight) * nll_loss + self.teacher_weight * distill_loss_scaled
+        loss = (1. - self.teacher_weight) * nll_loss + self.teacher_weight * distill_loss
 
         return loss, nll_loss
 
