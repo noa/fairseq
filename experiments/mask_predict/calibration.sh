@@ -20,7 +20,7 @@ VALIDATE=`realpath ../../validate.py`
 python ${VALIDATE} ${DATA_DIR} \
        --measure-calibration \
        --task translation_lev \
-       --criterion cross_entropy \
+       --criterion nat_loss \
        --valid-subset ${DATA_DIR}/valid \
        --path ${CHECKPOINTS} \
        --max-tokens 7000 \
