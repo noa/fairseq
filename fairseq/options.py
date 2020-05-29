@@ -514,6 +514,8 @@ def add_common_eval_args(group):
                        help='if set, write to separate file in numpy format')
     group.add_argument('--storage-format', default='hdf5', type=str,
                        help='storage format for teacher confidences')
+    group.add_argument('--memoize-temp', default=1., type=float,
+                       help='Temperature when writing log probs')
     # fmt: on
 
 

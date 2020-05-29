@@ -12,7 +12,13 @@ from fairseq.data import data_utils
 from fairseq.data import FairseqDataset
 from fairseq.data import LanguagePairDataset
 
+from torch.nn.utils.rnn import pad_sequence
+
 logger = logging.getLogger(__name__)
+
+
+def collate_torch_pad(values):
+    return pad_sequence(values, batch_first=True)
 
 
 def collate_3d(values):
@@ -22,12 +28,12 @@ def collate_3d(values):
     Output: 4d tensor with shape [N, T, D1, D2]
 
     """
-  
     max_len = max(v.size(0) for v in values)
     res = torch.zeros(len(values),
                       max_len,
                       values[0].size(1),
                       values[0].size(2)).type(values[0].type())
+    res = res * 5  # debugging XXXXX
 
     def copy_tensor(src, dst):
         assert dst.numel() == src.numel()
@@ -148,14 +154,20 @@ def collate(
         # Note: these are flattened; we need to unflatten to [B, L, K]
         ndim = samples[0]['teacher_inds'].dim()
         if ndim == 3:
-          teacher_inds = collate_3d([s['teacher_inds'] for s in samples])
-          teacher_vals = collate_3d([s['teacher_vals'] for s in samples])
+          inds = []
+          vals = []
+          for val, ind in zip([s['teacher_vals'] for s in samples],
+                              [s['teacher_inds'] for s in samples]):
+            inds.append(ind)
+            vals.append(val)
+          teacher_inds = collate_torch_pad(inds).index_select(0, sort_order)
+          teacher_vals = collate_torch_pad(vals).index_select(0, sort_order)
         elif ndim == 2:
-          teacher_inds = collate_2d([s['teacher_inds'] for s in samples])
-          teacher_vals = collate_2d([s['teacher_vals'] for s in samples])
+          teacher_inds = collate_2d([s['teacher_inds'] for s in samples]).index_select(0, sort_order)
+          teacher_vals = collate_2d([s['teacher_vals'] for s in samples]).index_select(0, sort_order)
         elif ndim == 1:
-          teacher_inds = collate_generic([s['teacher_inds'] for s in samples])
-          teacher_vals = collate_generic([s['teacher_vals'] for s in samples])
+          teacher_inds = collate_generic([s['teacher_inds'] for s in samples]).index_select(0, sort_order)
+          teacher_vals = collate_generic([s['teacher_vals'] for s in samples]).index_select(0, sort_order)
         else:
           raise ValueError(ndim)
 
@@ -371,10 +383,14 @@ class LanguagePairDatasetWithTeacher(LanguagePairDataset):
             if isinstance(self.teacher, list):
                 # time x expert x event
                 inds = [teacher_inds[index] for teacher_inds in self.teacher_inds]
+                for ind in inds:
+                  assert ind.reshape(-1, 64).shape[0] == tgt_item.shape[0], f"{ind.reshape(-1, 64).shape[0]} {tgt_item.shape[0]}"
                 example['teacher_inds'] = torch.stack(
                   [torch.LongTensor(i).reshape(-1, self.top_k) for i in inds], 1)
 
                 vals = [teacher_vals[index] for teacher_vals in self.teacher_vals]
+                for val in vals:
+                  assert val.reshape(-1, 64).shape[0] == tgt_item.shape[0], f"{val.reshape(-1, 64).shape[0]} {tgt_item.shape[0]}"
                 example['teacher_vals'] = torch.stack(
                   [torch.FloatTensor(v).reshape(-1, self.top_k) for v in vals], 1)
             else:
