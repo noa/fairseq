@@ -3,8 +3,7 @@
 set -e
 set -u
 
-# NOTE: In addition to epoch checkpoints, we save every 1000 steps.
-#       We keep the last 10 such checkpoints.
+# NOTE: Default learning rate: --lr 0.0005
 #
 # NOTE: Dropout is disabled
 #
@@ -20,25 +19,27 @@ MEM=12G
 HOURS=48
 
 # --- BATCHING ---
-UPDATE_FREQ=4
-MAX_TOKENS=3000
-WARMUP_UPDATE=2000
+UPDATE_FREQ=2
+MAX_TOKENS=4096
+WARMUP_UPDATE=500
+SAVE_INTERVAL_UPDATES=2000
 
 TEACHER_DIR=/expscratch/nandrews/nmt/fairseq/jobs/teachers
 
-if [ $# -lt 6 ]; then
-   echo "Usage: ${0} JOB_NAME TEACHER TOPK TEMP WEIGHT INIT MAX_UPDATE DIVERGENCE [FLAGS]"
+if [ $# -lt 9 ]; then
+   echo "Usage: ${0} JOB_NAME TOPK TEMP WEIGHT INIT MAX_UPDATE DIVERGENCE LR LS TEACHERS"
    exit
 fi
 
 JOB_NAME=${1}
-TEACHER=${2}
-TOPK=${3}
-T=${4}
-WEIGHT=${5}  # teacher weight
-INIT_JOB=${6}
-MAX_UPDATE=${7}
-DIVERGENCE=${8}
+TOPK=${2}
+T=${3}
+WEIGHT=${4}  # teacher weight
+INIT_JOB=${5}
+MAX_UPDATE=${6}
+DIVERGENCE=${7}
+LR=${8}
+LS=${9}
 shift
 shift
 shift
@@ -47,11 +48,16 @@ shift
 shift
 shift
 shift
+shift
+TEACHERS="$@"
 
-echo "Extra arguments: $@"
 echo "Temperature: ${T}"
 echo "Distillation loss weight: ${WEIGHT}"
 echo "Divergence: ${DIVERGENCE}"
+echo "Teachers: ${TEACHERS}"
+echo "Max update: ${MAX_UPDATE}"
+echo "Learning rate: ${LR}"
+echo "Label smoothing: ${LS}"
 
 DATA_DIR=/expscratch/nandrews/nmt/fairseq/data/wmt16_en_de_bpe32k
 if [ ! -d "${DATA_DIR}" ]; then
@@ -59,12 +65,8 @@ if [ ! -d "${DATA_DIR}" ]; then
     exit
 fi
 
-TEACHER_FILE="${TEACHER_DIR}/${TEACHER}"
-if [ ! -f "${TEACHER_FILE}" ]; then
-    echo "${TEACHER} not found"
-    ls -l ${TEACHER_DIR}
-    exit
-fi
+TEACHER_FILE=`python join_ensemble_path.py ${TEACHER_DIR} ${TEACHERS}`
+echo "${TEACHER_FILE}"
 
 INIT_DIR=/expscratch/nandrews/nmt/fairseq/jobs/scaling_nmt
 INIT_FILE="${INIT_DIR}/${INIT_JOB}/checkpoint_avg.pt"
@@ -75,12 +77,16 @@ if [ ! -f "${INIT_FILE}" ]; then
 fi
 echo "Init file: ${INIT_FILE}"
 
-JOB_DIR=/expscratch/${USER}/nmt/fairseq/jobs/scaling_nmt_distill/${JOB_NAME}_${T}_${WEIGHT}_${TEACHER}_${MAX_UPDATE}
+JOB_DIR=/expscratch/${USER}/nmt/fairseq/jobs/scaling_nmt_distill/${JOB_NAME}_${DIVERGENCE}_${T}_${TOPK}_${WEIGHT}_${MAX_UPDATE}_${LR}_${LS}_${TEACHERS}
+JOB_DIR="${JOB_DIR// /_}"
+echo "Job dir: ${JOB_DIR}"
 mkdir -p ${JOB_DIR}
 JOB_SCRIPT=${JOB_DIR}/job.sh
 
 echo "${JOB_DIR}"
 TRAIN="fairseq-train"
+
+#    --ddp-backend=no_c10d
 
 # Write training script
 cat >${JOB_SCRIPT} <<EOL
@@ -116,10 +122,11 @@ fairseq-train \
     --distill-loss-type combined \
     --distill-divergence ${DIVERGENCE} \
     --distill-temperature ${T} \
+    --label-smoothing ${LS} \
     --teacher-weight ${WEIGHT} \
     --arch transformer_wmt_en_de --share-all-embeddings \
     --optimizer adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 \
-    --lr 0.0005 --lr-scheduler inverse_sqrt \
+    --lr ${LR} --lr-scheduler inverse_sqrt \
     --warmup-updates ${WARMUP_UPDATE} \
     --warmup-init-lr 1e-07 \
     --weight-decay 0.0 \
@@ -130,9 +137,10 @@ fairseq-train \
     --max-tokens ${MAX_TOKENS} \
     --keep-last-epochs 10 \
     --update-freq ${UPDATE_FREQ} \
-    --keep-interval-updates 1000 \
-    --keep-interval-updates 10 \
-    --max-update ${MAX_UPDATE} $@
+    --save-interval-updates ${SAVE_INTERVAL_UPDATES} \
+    --keep-interval-updates 5 \
+    --max-update ${MAX_UPDATE} \
+    --fp16
 
 EOL
 
@@ -140,5 +148,6 @@ chmod a+x ${JOB_SCRIPT}
 QSUB_CMD="qsub -q gpu.q@@${GPU_TYPE} -l gpu=${N_GPU},mem_free=${MEM},h_rt=${HOURS}:00:00,num_proc=${NUM_PROC} ${JOB_SCRIPT}"
 echo ${QSUB_CMD}
 ${QSUB_CMD}
+#bash ${JOB_SCRIPT}
 
 # eof

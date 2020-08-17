@@ -20,14 +20,14 @@ HOURS=48
 
 # --- BATCHING ---
 UPDATE_FREQ=2
-MAX_TOKENS=3000
+MAX_TOKENS=4096
 WARMUP_UPDATE=500
-SAVE_INTERVAL_UPDATES=500
+SAVE_INTERVAL_UPDATES=2000
 
 TEACHER_DIR=/expscratch/nandrews/nmt/fairseq/jobs/teachers
 
-if [ $# -lt 8 ]; then
-   echo "Usage: ${0} JOB_NAME TOPK TEMP WEIGHT INIT MAX_UPDATE DIVERGENCE LR TEACHERS"
+if [ $# -lt 9 ]; then
+   echo "Usage: ${0} JOB_NAME TOPK TEMP WEIGHT INIT MAX_UPDATE DIVERGENCE LR LS TEACHERS"
    exit
 fi
 
@@ -39,6 +39,8 @@ INIT_JOB=${5}
 MAX_UPDATE=${6}
 DIVERGENCE=${7}
 LR=${8}
+LS=${9}
+shift
 shift
 shift
 shift
@@ -55,6 +57,7 @@ echo "Divergence: ${DIVERGENCE}"
 echo "Teachers: ${TEACHERS}"
 echo "Max update: ${MAX_UPDATE}"
 echo "Learning rate: ${LR}"
+echo "Label smoothing: ${LS}"
 
 DATA_DIR=/expscratch/nandrews/nmt/fairseq/data/wmt16_en_de_bpe32k
 if [ ! -d "${DATA_DIR}" ]; then
@@ -74,7 +77,7 @@ if [ ! -f "${INIT_FILE}" ]; then
 fi
 echo "Init file: ${INIT_FILE}"
 
-JOB_DIR=/expscratch/${USER}/nmt/fairseq/jobs/scaling_nmt_distill/${JOB_NAME}_${DIVERGENCE}_${T}_${TOPK}_${WEIGHT}_${MAX_UPDATE}_${LR}_${TEACHERS}
+JOB_DIR=/expscratch/${USER}/nmt/fairseq/jobs/scaling_nmt_distill/${JOB_NAME}_${DIVERGENCE}_${T}_${TOPK}_${WEIGHT}_${MAX_UPDATE}_${LR}_${LS}_${TEACHERS}
 JOB_DIR="${JOB_DIR// /_}"
 echo "Job dir: ${JOB_DIR}"
 mkdir -p ${JOB_DIR}
@@ -119,6 +122,7 @@ fairseq-train \
     --distill-loss-type separate \
     --distill-divergence ${DIVERGENCE} \
     --distill-temperature ${T} \
+    --label-smoothing ${LS} \
     --teacher-weight ${WEIGHT} \
     --arch transformer_wmt_en_de --share-all-embeddings \
     --optimizer adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 \
@@ -134,8 +138,9 @@ fairseq-train \
     --keep-last-epochs 10 \
     --update-freq ${UPDATE_FREQ} \
     --save-interval-updates ${SAVE_INTERVAL_UPDATES} \
-    --keep-interval-updates 20 \
-    --max-update ${MAX_UPDATE}
+    --keep-interval-updates 5 \
+    --max-update ${MAX_UPDATE} \
+    --fp16
 
 EOL
 

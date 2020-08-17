@@ -9,6 +9,7 @@ import torch.nn.functional as F
 
 from fairseq import metrics, utils
 from fairseq.criterions import FairseqCriterion, register_criterion
+from fairseq.criterions.label_smoothed_cross_entropy import label_smoothed_nll_loss
 
 
 def smooth(lprobs, temperature):
@@ -23,10 +24,10 @@ def smooth(lprobs, temperature):
     if temperature == 1.0:
         return lprobs
 
-    return torch.log_softmax(lprobs * temperature, 1)
+    return torch.log_softmax(lprobs / temperature, 1)
 
 
-def smooth_partial(lprobs, temperature, eps=1e-3):
+def smooth_partial(lprobs, temperature, eps=1e-4):
     """lprobs (N x K): N sets of K log probabilities
        temperature (float): temperature to smooth the distributions
 
@@ -95,8 +96,10 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
     def __init__(self, task, sentence_avg, distill_temperature=1.0,
                  teacher_weight=0.1, teacher_top_k=None,
                  distill_divergence='mse',
-                 distill_loss_type='separate'):
+                 distill_loss_type='separate',
+                 label_smoothing=0.0):
         super().__init__(task)
+        self.eps = label_smoothing
         self.sentence_avg = sentence_avg
         self.temperature = distill_temperature
         assert self.temperature > 1e-5
@@ -110,11 +113,14 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
         print(f"Distill temp: {self.temperature}")
         print(f"Teacher weight: {self.teacher_weight}")
         print(f"Loss type: {self.loss_type}")
+        print(f"Label smoothing: {self.eps}")
 
     @staticmethod
     def add_args(parser):
         """Add criterion-specific arguments to the parser."""
         # fmt: off
+        parser.add_argument('--label-smoothing', default=0., type=float, metavar='D',
+                            help='epsilon for label smoothing, 0 means no label smoothing')
         parser.add_argument('--distill-temperature', default=1.0, type=float,
                             help='Temperature for distillation')
         parser.add_argument('--teacher-weight', default=0.1, type=float,
@@ -157,11 +163,14 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
         lprobs = lprobs.view(-1, lprobs.size(-1))
         target = model.get_targets(sample, net_output).view(-1)
 
-        nll_loss = F.nll_loss(
-            lprobs,
-            target,
-            ignore_index=self.padding_idx,
-            reduction='sum' if reduce else 'none',
+        # nll_loss = F.nll_loss(
+        #     lprobs,
+        #     target,
+        #     ignore_index=self.padding_idx,
+        #     reduction='sum' if reduce else 'none',
+        # )
+        ls_loss, nll_loss = label_smoothed_nll_loss(
+            lprobs, target, self.eps, ignore_index=self.padding_idx, reduce=reduce,
         )
 
         # For test / validation, we just return the nll loss
@@ -170,9 +179,10 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
         
         # Calculate the distillation loss
         if self.loss_type == 'combined':
-          soft_lprobs = smooth(lprobs, self.temperature)
-          vals = sample['teacher_vals'].reshape(-1, self.K)
-          inds = sample['teacher_inds'].reshape(-1, self.K)
+          keep_mask = target.ne(self.padding_idx)
+          soft_lprobs = smooth(lprobs, self.temperature)[keep_mask]
+          vals = sample['teacher_vals'].reshape(-1, self.K)[keep_mask]
+          inds = sample['teacher_inds'].reshape(-1, self.K)[keep_mask]
           soft_targets = smooth_partial(vals, self.temperature)
 
           # Compute KL[teacher(T), student(T)]
@@ -185,6 +195,10 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
             distill_loss = partial_kl_div(soft_targets.detach(),
                                           soft_lprobs,
                                           inds)
+          elif self.divergence == 'ce':
+            distill_loss = partial_ce(soft_targets.detach(),
+                                      soft_lprobs,
+                                      inds)
         elif self.loss_type == 'separate':
           keep_mask = target.ne(self.padding_idx)
           lprobs = smooth(lprobs, self.temperature)[keep_mask]  # maybe anneal student
@@ -212,10 +226,19 @@ class DistillationCrossEntropyCriterion(FairseqCriterion):
         if reduce:
             distill_loss = distill_loss.sum()
 
+        # According to [1]: "Since the magnitudes of the gradients
+        # produced by the soft targets scale as 1/T^2 it is important
+        # to multiply them by T^2 when using both hard and soft
+        # targets. This ensures that the relative contributions of the
+        # hard and soft targets remain roughly unchanged if the
+        # temperature used for distillation is changed while
+        # experimenting with meta-parameters."
+        distill_loss = distill_loss * (self.temperature ** 2)
+
         # According to [1]: "We found that the best results were
         # generally obtained by using a condiderably lower weight on
         # the [NLL loss]."
-        loss = (1. - self.teacher_weight) * nll_loss + self.teacher_weight * distill_loss
+        loss = (1. - self.teacher_weight) * ls_loss + self.teacher_weight * distill_loss
 
         return loss, nll_loss
 
