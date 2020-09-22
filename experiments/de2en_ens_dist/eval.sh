@@ -4,7 +4,8 @@ set -e
 set -u
 
 if [ $# -lt 1 ]; then
-   echo "Usage: ${0} JOB_NAME"
+    echo "Usage: ${0} JOB_NAME"
+    ls /expscratch/${USER}/nmt/fairseq/jobs/de2en
    exit
 fi
 
@@ -25,6 +26,8 @@ DATA_DIR=/expscratch/nandrews/nmt/fairseq/data/wmt16_de_en_bpe32k
 GEN=/tmp/gen.out
 fairseq-generate \
     ${DATA_DIR} \
+    --source-lang de \
+    --target-lang en \
     --path /tmp/avg_checkpoint.pt \
     --beam 4 --lenpen 0.6 --remove-bpe > ${GEN}
 

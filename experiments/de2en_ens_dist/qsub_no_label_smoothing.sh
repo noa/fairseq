@@ -59,6 +59,7 @@ export MKL_SERVICE_FORCE_INTEL=1
 
 fairseq-train \
     ${DATA_DIR} \
+    --source-lang de --target-lang en \
     --arch transformer_wmt_en_de --share-all-embeddings \
     --optimizer adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 \
     --lr 0.0007 --lr-scheduler inverse_sqrt --warmup-updates 4000 --warmup-init-lr 1e-07 \

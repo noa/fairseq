@@ -59,6 +59,7 @@ def log_sum_exp(value, weights, dim=None, eps=1e-20):
                                                 dim=dim) + eps)
 
 def fast_ensemble_lprobs(task, sample, models, criterion):
+    assert models
     lprobs = []
     for model in models:
       lp = task.predict_step(sample, model, criterion)

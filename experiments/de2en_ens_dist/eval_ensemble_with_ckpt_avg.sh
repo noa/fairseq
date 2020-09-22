@@ -20,7 +20,7 @@ declare -A CKPTS
 for JOB_NAME in $@; do
     JOB_DIR=/expscratch/${USER}/nmt/fairseq/jobs/de2en/${JOB_NAME}
     AVG=`realpath ../../scripts/average_checkpoints.py`
-    CKPT="${JOB_DIR}/avg_${N}_checkpoint.pt"
+    CKPT="${JOB_DIR}/checkpoint_avg.pt"
     CKPTS[${JOB_NAME}]="${CKPT}"
     if [ ! -f ${CKPT} ]; then
        python ${AVG} \

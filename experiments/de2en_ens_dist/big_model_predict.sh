@@ -36,13 +36,11 @@ echo "Top K: ${TOP_K}"
 
 python ${VALIDATE} ${DATA_DIR} \
        --task translation \
-       --source-lang de \
-       --target-lang en \
        --criterion cross_entropy \
        --valid-subset ${DATA_DIR}/train \
        --full-dist-path ${OUTPUT_FILE} \
        --path ${CHECKPOINTS} \
-       --max-tokens 8000 \
+       --max-tokens 2048 \
        --print-full-dist \
        --dist-top-k ${TOP_K} \
        --fp16 \
