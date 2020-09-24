@@ -8,8 +8,6 @@ set -u
 # NOTE: Dropout is disabled
 #
 # NOTE: We initialize from an average checkpoint rather than the last.
-#
-# NOTE: float16 is disabled
 
 # NOTE: LS = 0 -> no label smoothing
 
@@ -23,7 +21,7 @@ HOURS=48
 # --- BATCHING ---
 UPDATE_FREQ=2
 MAX_TOKENS=4096
-WARMUP_UPDATE=500
+WARMUP_UPDATE=5000
 SAVE_INTERVAL_UPDATES=2000
 
 TEACHER_DIR=/expscratch/nandrews/nmt/fairseq/jobs/de2en/teachers
@@ -37,12 +35,11 @@ JOB_NAME=${1}
 TOPK=${2}
 T=${3}
 WEIGHT=${4}  # teacher weight
-INIT_JOB=${5}
-MAX_UPDATE=${6}
-DIVERGENCE=${7}
+MAX_UPDATE=${5}
+DIVERGENCE=${6}
+DROPOUT=${7}
 LR=${8}
 LS=${9}
-shift
 shift
 shift
 shift
@@ -60,6 +57,7 @@ echo "Teachers: ${TEACHERS}"
 echo "Max update: ${MAX_UPDATE}"
 echo "Learning rate: ${LR}"
 echo "Label smoothing: ${LS}"
+echo "Dropout: ${DROPOUT}"
 
 DATA_DIR=/expscratch/nandrews/nmt/fairseq/data/wmt16_de_en_bpe32k
 if [ ! -d "${DATA_DIR}" ]; then
@@ -70,16 +68,7 @@ fi
 TEACHER_FILE=`python join_ensemble_path.py ${TEACHER_DIR} ${TEACHERS}`
 echo "${TEACHER_FILE}"
 
-INIT_DIR=/expscratch/nandrews/nmt/fairseq/jobs/de2en
-INIT_FILE="${INIT_DIR}/${INIT_JOB}/checkpoint_avg.pt"
-if [ ! -f "${INIT_FILE}" ]; then
-    echo "${INIT_FILE} not found"
-    ls -l ${INIT_DIR}
-    exit
-fi
-echo "Init file: ${INIT_FILE}"
-
-JOB_DIR=/expscratch/${USER}/nmt/fairseq/jobs/de2en_ens_distill/${JOB_NAME}_${INIT_JOB}_${DIVERGENCE}_${T}_${TOPK}_${WEIGHT}_${MAX_UPDATE}_${LR}_${LS}_${TEACHERS}
+JOB_DIR=/expscratch/${USER}/nmt/fairseq/jobs/de2en_ens_distill/${JOB_NAME}_FROM_SCRATCH_${DIVERGENCE}_${T}_${TOPK}_${WEIGHT}_${MAX_UPDATE}_${LR}_${LS}_${DROPOUT}_${TEACHERS}
 JOB_DIR="${JOB_DIR// /_}"
 echo "Job dir: ${JOB_DIR}"
 mkdir -p ${JOB_DIR}
@@ -87,8 +76,6 @@ JOB_SCRIPT=${JOB_DIR}/job.sh
 
 echo "${JOB_DIR}"
 TRAIN="fairseq-train"
-
-#    --ddp-backend=no_c10d
 
 # Write training script
 cat >${JOB_SCRIPT} <<EOL
@@ -134,7 +121,7 @@ fairseq-train \
     --warmup-updates ${WARMUP_UPDATE} \
     --warmup-init-lr 1e-07 \
     --weight-decay 0.0 \
-    --dropout 0.0 \
+    --dropout ${DROPOUT} \
     --criterion distillation_cross_entropy \
     --no-progress-bar \
     --save-dir ${JOB_DIR} \

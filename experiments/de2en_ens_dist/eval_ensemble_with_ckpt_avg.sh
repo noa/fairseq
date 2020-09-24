@@ -1,6 +1,6 @@
 #!/bin/sh
 
-set -euxo pipefail
+set -euo pipefail
 
 if [ $# -lt 2 ]; then
     echo "Usage: ${0} N_TO_AVG JOB_NAME1 [JOB_NAME2] [...]"

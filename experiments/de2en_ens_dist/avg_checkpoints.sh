@@ -3,7 +3,7 @@
 set -e
 set -u
 
-JOBS_DIR=/expscratch/${USER}/nmt/fairseq/jobs/scaling_nmt
+JOBS_DIR=/expscratch/${USER}/nmt/fairseq/jobs/de2en
 
 if [ $# -lt 2 ]; then
     echo "Usage: ${0} JOB_NAME LAST_N"
