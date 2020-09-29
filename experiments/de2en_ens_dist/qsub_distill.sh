@@ -27,7 +27,7 @@ SAVE_INTERVAL_UPDATES=2000
 TEACHER_DIR=/expscratch/nandrews/nmt/fairseq/jobs/de2en/teachers
 
 if [ $# -lt 9 ]; then
-   echo "Usage: ${0} JOB_NAME TOPK TEMP WEIGHT INIT MAX_UPDATE DIVERGENCE LR LS TEACHERS"
+   echo "Usage: ${0} JOB_NAME TOPK TEMP WEIGHT MAX_UPDATE DIVERGENCE DROPOUT LR LS TEACHERS"
    exit
 fi
 
@@ -40,6 +40,7 @@ DIVERGENCE=${6}
 DROPOUT=${7}
 LR=${8}
 LS=${9}
+shift
 shift
 shift
 shift
@@ -66,7 +67,7 @@ if [ ! -d "${DATA_DIR}" ]; then
 fi
 
 TEACHER_FILE=`python join_ensemble_path.py ${TEACHER_DIR} ${TEACHERS}`
-echo "${TEACHER_FILE}"
+echo "Teacher: ${TEACHER_FILE}"
 
 JOB_DIR=/expscratch/${USER}/nmt/fairseq/jobs/de2en_ens_distill/${JOB_NAME}_FROM_SCRATCH_${DIVERGENCE}_${T}_${TOPK}_${WEIGHT}_${MAX_UPDATE}_${LR}_${LS}_${DROPOUT}_${TEACHERS}
 JOB_DIR="${JOB_DIR// /_}"
@@ -107,7 +108,6 @@ fairseq-train \
     --reset-optimizer \
     --reset-lr-scheduler \
     --reset-dataloader \
-    --restore-file ${INIT_FILE} \
     --teacher-pred ${TEACHER_FILE} \
     --teacher-top-k ${TOPK} \
     --distill-loss-type combined \
