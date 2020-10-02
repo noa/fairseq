@@ -21,11 +21,13 @@ if ! [[ $CKPT =~ $re ]] ; then
     CKPT_PATH="${JOB_DIR}/checkpoint_${CKPT}.pt"
 else
     AVG=`realpath ../../scripts/average_checkpoints.py`
-    CKPT_PATH="/tmp/avg_checkpoint.pt"
-    python ${AVG} \
-	   --inputs ${JOB_DIR} \
-	   --num-epoch-checkpoints ${CKPT} \
-	   --output ${CKPT_PATH}
+    CKPT_PATH="${JOB_DIR}/checkpoint_avg.pt"
+    if [ ! -f ${CKPT_PATH} ]; then
+	python ${AVG} \
+	       --inputs ${JOB_DIR} \
+	       --num-epoch-checkpoints ${CKPT} \
+	       --output ${CKPT_PATH}
+    fi
 fi
 
 echo "Evaluating checkpoint at: ${CKPT_PATH}"

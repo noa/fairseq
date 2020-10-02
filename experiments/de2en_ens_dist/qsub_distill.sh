@@ -16,7 +16,7 @@ N_GPU=4  # args must be adjusted below if this is changed
 NUM_PROC=40
 GPU_TYPE=2080
 MEM=12G
-HOURS=48
+HOURS=96
 
 # --- BATCHING ---
 UPDATE_FREQ=2

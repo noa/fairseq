@@ -3,15 +3,17 @@
 set -e
 set -u
 
-JOBS_DIR=/expscratch/${USER}/nmt/fairseq/jobs/de2en_ens_distill
+#JOBS_DIR=/expscratch/${USER}/nmt/fairseq/jobs/de2en_ens_distill
 
-if [ $# -lt 2 ]; then
-    echo "Usage: ${0} <SPLIT> <JOBS>"
+if [ $# -lt 3 ]; then
+    echo "Usage: ${0} <SPLIT> <JOBS_DIR> <JOBS>"
     ls ${JOBS_DIR}
     exit
 fi
 
 SPLIT=$1
+JOBS_DIR=$2
+shift
 shift
 
 CHECKPOINTS=`python join_ensemble_path.py ${JOBS_DIR} $@`
