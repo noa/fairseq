@@ -4,11 +4,11 @@ set -e
 set -u
 
 # --- SYSTEM ---
-N_GPU=2  # args must be adjusted below if this is changed
-UPDATE_FREQ=4
+N_GPU=4  # args must be adjusted below if this is changed
+UPDATE_FREQ=2
 MAX_UPDATE=300000
 GPU_TYPE=2080
-NUM_PROC=20
+NUM_PROC=40
 MEM=12G
 HOURS=48
 

@@ -4,7 +4,8 @@ set -e
 set -u
 
 if [ $# -lt 1 ]; then
-   echo "Usage: ${0} JOB_NAME"
+    echo "Usage: ${0} JOB_NAME"
+    ls /expscratch/${USER}/nmt/fairseq/jobs/scaling_nmt
    exit
 fi
 
