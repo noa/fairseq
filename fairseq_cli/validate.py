@@ -9,8 +9,10 @@ import logging
 import sys
 import os
 import numpy as np
-
+import h5py
+from scipy.special import logsumexp
 import torch
+from sklearn.calibration import calibration_curve
 
 from fairseq import checkpoint_utils, distributed_utils, options, utils
 from fairseq.logging import metrics, progress_bar
@@ -23,6 +25,50 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 logger = logging.getLogger('fairseq_cli.validate')
+
+def top_n_ece(labels, lprobs, top_n=1, bins=10):
+    """ Computes ECE of top n predictions per token """
+    top_labels = np.zeros((len(labels), top_n))
+    top_probs = np.zeros_like(top_labels)
+    for i, label in enumerate(labels):
+      ind = np.argpartition(lprobs[i, :], -top_n)[-top_n:]
+      top_labels[i, :] = np.where(ind == label, 1.0, 0.0)
+      top_probs[i, :] = lprobs[i, :][ind]
+    top_probs = np.exp(top_probs)
+    fop, mpv = calibration_curve(top_labels.flatten(),
+                                 top_probs.flatten(),
+                                 strategy='quantile',
+                                 n_bins=bins)
+    ece = np.mean(np.abs(fop - mpv))
+    return ece
+
+def get_ensemble_lprobs(task, sample, models, criterion):
+    lprobs = []
+    n_models = len(models)
+    for model in models:
+      lp = task.predict_step(sample, model, criterion).cpu().numpy()
+      if n_models < 2:
+        return lp
+      lprobs.append(lp.astype(np.float32))
+    lprobs = np.stack(lprobs)
+    return logsumexp(lprobs, axis=0, b=float(1. / n_models)).astype(np.float32)
+
+def log_sum_exp(value, weights, dim=None, eps=1e-20):
+    m, idx = torch.max(value, dim=dim, keepdim=True)
+    return m.squeeze(dim) + torch.log(torch.sum(torch.exp(value - m) * weights,
+                                                dim=dim) + eps)
+
+def fast_ensemble_lprobs(task, sample, models, criterion):
+    assert models
+    lprobs = []
+    for model in models:
+      lp = task.predict_step(sample, model, criterion)
+      if len(models) < 2:
+        return lp
+      lprobs.append(lp)
+    lprobs = torch.stack(lprobs)
+    weights = torch.ones_like(lprobs) * (1. / lprobs.size(0))
+    return log_sum_exp(lprobs, weights, dim=0)
 
 
 def main(args, override_args=None):
@@ -41,34 +87,32 @@ def main(args, override_args=None):
     print(f"Use CPU? {args.cpu}")
     print(f"Use CUDA? {use_cuda}")
 
-    # if override_args is not None:
-    #     print(override_args)
-    #     overrides = vars(override_args)
-    #     overrides.update(eval(getattr(override_args, 'model_overrides', '{}')))
-    # else:
-    #     overrides = None
     overrides = {'criterion': 'cross_entropy'}
 
     # Load ensemble
     logger.info('loading model(s) from {}'.format(args.path))
     models, model_args, task = checkpoint_utils.load_model_ensemble_and_task(
-        [args.path],
+        args.path.split(':'),
         arg_overrides=overrides,
         suffix=getattr(args, "checkpoint_suffix", ""),
     )
-    print("WARNING: Just taking first model from ensemble")
-    model = models[0]
 
-    # If we're obtaining full distributions, we need to serialize them
-    # in binary format. We use this strategy:
-    # https://stackoverflow.com/questions/47493409/streaming-multiple-numpy-arrays-to-a-file
+    if len(models) > 1:
+        print(f"Loaded ensemble of {len(models)} models")
+
     if args.print_full_dist:
         assert args.full_dist_path
         import pickle
         if os.path.exists(args.full_dist_path):
             print(f"Deleting existing file: {args.full_dist_path}")
             os.remove(args.full_dist_path)
-        dist_output_file = open(args.full_dist_path, 'ab')
+
+        if args.storage_format == 'pickle':
+          dist_output_file = open(args.full_dist_path, 'ab')
+        elif args.storage_format == 'hdf5':
+          dist_output_file = h5py.File(args.full_dist_path, 'w', libver='latest')
+        else:
+          raise ValueError(args.storage_format)
 
     # Move models to GPU
     for model in models:
@@ -91,6 +135,17 @@ def main(args, override_args=None):
             dataset = task.dataset(subset)
         except KeyError:
             raise Exception('Cannot find dataset: ' + subset)
+
+        # How big is the dataset?
+        n_examples = len(dataset)
+        print(f"Number of examples: {n_examples}")
+
+        if args.storage_format == 'hdf5' and args.print_full_dist:
+          # Create the datasets
+          lprobs_dataset = dist_output_file.create_dataset("lprobs", (n_examples,),
+                                                           dtype=h5py.vlen_dtype('float32'))
+          indices_dataset = dist_output_file.create_dataset("indices", (n_examples,),
+                                                            dtype=h5py.vlen_dtype('int32'))
 
         # Initialize data iterator
         print(f"Num workers: {args.num_workers}")
@@ -115,25 +170,22 @@ def main(args, override_args=None):
             default_log_format=('tqdm' if not args.no_progress_bar else 'simple'),
         )
 
+        if args.measure_calibration:
+            print("Measuring calibration...")
+
         log_outputs = []
         for i, sample in enumerate(progress):
             sample = utils.move_to_cuda(sample) if use_cuda else sample
             if args.print_full_dist:
-                # IMPORTANT NOTE: Padding is used for sents of diff len
-                #print(criterion.padding_idx)
                 target = sample['target']
-                lprobs = task.predict_step(sample, model, criterion)
+
+                #lprobs = task.predict_step(sample, models[0], criterion)
+                #vals, inds = lprobs.topk(args.dist_top_k)
+
+                # This version is potentially quite slow, despite the name
+                lprobs = fast_ensemble_lprobs(task, sample, models, criterion)
                 vals, inds = lprobs.topk(args.dist_top_k)
-                #print(vals.shape)
-                #print(inds.shape)
-                #lmass = vals.logsumexp(2)
-                #print(m32.exp().mean())
-                #means.append(lmass.exp().mean().cpu().numpy())
-                #print(np.mean(means))
-                #t64 = lprobs.topk(lprobs, 64)
-                #t128 = lprobs.topk(lprobs, 128)
-                #lprobs = lprobs.cpu().numpy()
-                #print(lprobs.shape)
+
                 ids = sample['id'].cpu().numpy()
                 keep = np.logical_not(target.eq(criterion.padding_idx).cpu().numpy())
                 vals = vals.cpu().numpy()
@@ -141,19 +193,61 @@ def main(args, override_args=None):
                 n_sentences = ids.shape[0]
                 for j in range(n_sentences):
                     kj = keep[j]
-                    #s = sum(kj)
-                    #l = kj.shape[0]
-                    #if s < l:
-                    #  print(f'{s} {l}')
-                    pickle.dump((ids[j], vals[j][kj], inds[j][kj]),
-                                dist_output_file)
+                    if args.storage_format == 'pickle':
+                      pickle.dump((ids[j], vals[j][kj], inds[j][kj]),
+                                  dist_output_file)
+                    elif args.storage_format == 'hdf5':
+                      id_ = ids[j]
+                      lprobs_dataset[id_] = vals[j][kj].flatten()
+                      indices_dataset[id_] = inds[j][kj].flatten()
+                    else:
+                      raise ValueError(args.storage_format)
+            elif args.measure_calibration:
+                target = sample['target']
+                #lprobs = task.predict_step(sample, model, criterion).cpu().numpy()
+                lprobs = get_ensemble_lprobs(task, sample, models, criterion)
+                keep = np.logical_not(target.eq(criterion.padding_idx).cpu().numpy())
+                log_outputs.append({
+                  'lprobs': lprobs[keep],
+                  'targets': target.cpu().numpy()[keep]})
             else:
                 _loss, _sample_size, log_output = task.valid_step(sample, model, criterion)
                 progress.log(log_output, step=i)
                 log_outputs.append(log_output)
 
         if args.print_full_dist:
-            dist_output_file.close()
+            if args.storage_format == 'pickle':
+                dist_output_file.close()
+            elif args.storage_format == 'hdf5':
+                dist_output_file.close()
+            else:
+                raise ValueError(args.storage_format)
+        elif args.measure_calibration:
+            # https://github.com/tensorflow/probability/blob/master/tensorflow_probability/python/stats/calibration.py
+            #import tensorflow as tf
+            #from tensorflow_probability.python.stats.calibration import brier_score
+            #from tensorflow_probability.python.stats.calibration import expected_calibration_error_quantiles
+            from sklearn.metrics import brier_score_loss
+            labels = np.concatenate([batch['targets'] for batch in log_outputs], 0)
+            logits = np.concatenate([batch['lprobs'] for batch in log_outputs], 0)
+            #with tf.device("/cpu:0"):
+            print("Computing Brier score...")
+            #print("TODO: Should be computed incrementally to be more memory efficient.")
+            b = 0
+            for i, label in enumerate(labels):
+              b += brier_score_loss([1.0], [min(1.0, np.exp(logits[i, label]))])
+            b /= len(labels)
+            print(f"Brier score +: {b}")
+              #print("Computing ECE...")
+              #ece = expected_calibration_error_quantiles(hit=labels, pred_log_prob=logits,
+              #                                 num_buckets=10)
+              #print(f"ECE: {ece}")
+            print("Computing Top 1 ECE...")
+            ece_1 = top_n_ece(labels, logits, top_n=1)
+            print(f"Top 1 ECE: {ece_1}")
+            print("Computing Top 5 ECE...")
+            ece_5 = top_n_ece(labels, logits, top_n=5)
+            print(f"Top 5 ECE: {ece_5}")
         else:
             with metrics.aggregate() as agg:
                 task.reduce_metrics(log_outputs, criterion)

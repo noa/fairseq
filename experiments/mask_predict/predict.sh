@@ -4,7 +4,7 @@ set -e
 set -u
 
 # Where we fetch pre-trained models
-JOBS_DIR=/expscratch/${USER}/nmt/fairseq/jobs/scaling_nmt
+JOBS_DIR=/expscratch/${USER}/nmt/fairseq/jobs/mask_predict
 
 # Where we save the confidences
 OUTPUT_DIR=/expscratch/${USER}/nmt/fairseq/jobs/teachers

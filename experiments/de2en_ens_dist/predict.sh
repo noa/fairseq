@@ -4,10 +4,10 @@ set -e
 set -u
 
 # Where we fetch pre-trained models
-JOBS_DIR=/expscratch/${USER}/nmt/fairseq/jobs/scaling_nmt
+JOBS_DIR=/expscratch/${USER}/nmt/fairseq/jobs/de2en
 
 # Where we save the confidences
-OUTPUT_DIR=/expscratch/${USER}/nmt/fairseq/jobs/teachers
+OUTPUT_DIR=/expscratch/${USER}/nmt/fairseq/jobs/de2en/teachers
 mkdir -p ${OUTPUT_DIR}
 
 if [ $# -lt 2 ]; then
@@ -25,7 +25,7 @@ shift
 
 CHECKPOINTS=`python join_ensemble_path.py --checkpoint ${CKPT} ${JOBS_DIR} $@`
 echo "Checkpoints: ${CHECKPOINTS}"
-DATA_DIR=/expscratch/nandrews/nmt/fairseq/data/wmt16_en_de_bpe32k
+DATA_DIR=/expscratch/nandrews/nmt/fairseq/data/wmt16_de_en_bpe32k
 
 VALIDATE=`realpath ../../validate.py`
 OUTPUT_FILE="$@_${TOP_K}_${CKPT}.h5"
@@ -36,6 +36,8 @@ echo "Top K: ${TOP_K}"
 
 python ${VALIDATE} ${DATA_DIR} \
        --task translation \
+       --source-lang de \
+       --target-lang en \
        --criterion cross_entropy \
        --valid-subset ${DATA_DIR}/train \
        --full-dist-path ${OUTPUT_FILE} \

@@ -5,12 +5,12 @@ set -u
 
 if [ $# -lt 1 ]; then
     echo "Usage: ${0} JOB_NAME"
-    ls /expscratch/${USER}/nmt/fairseq/jobs/scaling_nmt
+    ls /expscratch/${USER}/nmt/fairseq/jobs/de2en
    exit
 fi
 
 JOB_NAME=${1}
-JOB_DIR=/expscratch/${USER}/nmt/fairseq/jobs/scaling_nmt/${JOB_NAME}
+JOB_DIR=/expscratch/${USER}/nmt/fairseq/jobs/de2en/${JOB_NAME}
 
 AVG=`realpath ../../scripts/average_checkpoints.py`
 
@@ -19,13 +19,15 @@ python ${AVG} \
     --num-epoch-checkpoints 10 \
     --output /tmp/avg_checkpoint.pt
 
-DATA_DIR=/expscratch/nandrews/nmt/fairseq/data/wmt16_en_de_bpe32k
+DATA_DIR=/expscratch/nandrews/nmt/fairseq/data/wmt16_de_en_bpe32k
 
 # Note: without `--quiet`, this will print the translations and corresponding
 # sequence- and token-level scores.
 GEN=/tmp/gen.out
 fairseq-generate \
     ${DATA_DIR} \
+    --source-lang de \
+    --target-lang en \
     --path /tmp/avg_checkpoint.pt \
     --beam 4 --lenpen 0.6 --remove-bpe > ${GEN}
 
